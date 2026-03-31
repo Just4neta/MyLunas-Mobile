@@ -11,7 +11,7 @@ plugins {
 }
 
 android {
-namespace = "com.example.mylunas_160326"
+    namespace = "com.mylunas.mobile"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -34,7 +34,7 @@ namespace = "com.example.mylunas_160326"
     }
 
     defaultConfig {
-        applicationId = "com.example.mylunas_160326"
+        applicationId = "com.mylunas.mobile"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

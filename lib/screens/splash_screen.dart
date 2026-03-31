@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'login_screen.dart';
-import 'home_screen.dart';
+import 'quote_screen.dart';
 import '../services/secure_storage.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -49,7 +49,8 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    Future.delayed(const Duration(milliseconds: 3500), () {
+    // Navigate immediately after first frame — no delay
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkLoginStatus();
     });
   }
@@ -61,7 +62,7 @@ class _SplashScreenState extends State<SplashScreen>
         context,
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) =>
-              isLoggedIn ? const HomeScreen() : const LoginScreen(),
+              isLoggedIn ? const QuoteScreen() : const LoginScreen(),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return FadeTransition(opacity: animation, child: child);
           },

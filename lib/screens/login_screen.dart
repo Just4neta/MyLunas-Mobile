@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'home_screen.dart';
+import 'quote_screen.dart';
 import '../services/secure_storage.dart';
+import '../l10n/app_strings.dart';
+import '../l10n/locale_controller.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,31 +20,80 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _rememberMe = true;
+  final LocaleController _localeController = LocaleController();
+
+  @override
+  void initState() {
+    super.initState();
+    _localeController.addListener(() => setState(() {}));
+  }
 
   Future<void> _login() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
-
-      // Simpan credentials dulu
-      await SecureStorage.saveCredentials(
-        _emailController.text.trim(),
-        _passwordController.text,
-      );
-
-      if (mounted) {
-        // Buka WebView untuk authenticate
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => _AuthWebView(
-              email: _emailController.text.trim(),
-              password: _passwordController.text,
-            ),
-          ),
+      try {
+        bool success = await _verifyCredentials(
+          _emailController.text.trim(),
+          _passwordController.text,
         );
+        if (success) {
+          await SecureStorage.saveCredentials(
+            _emailController.text.trim(),
+            _passwordController.text,
+          );
+          await SecureStorage.saveLoginStatus();
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              PageRouteBuilder(
+                pageBuilder: (_, __, ___) => const QuoteScreen(),
+                transitionsBuilder: (_, animation, __, child) =>
+                    FadeTransition(opacity: animation, child: child),
+                transitionDuration: const Duration(milliseconds: 600),
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(AppStrings.get('login_error')),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ));
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(AppStrings.get('login_network_error')),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
       }
+    }
+  }
 
-      setState(() => _isLoading = false);
+  Future<bool> _verifyCredentials(String email, String password) async {
+    try {
+      final client = http.Client();
+      final request = http.Request(
+        'POST',
+        Uri.parse('https://apps2.mylunas.com.my/eleave/controller/LoginController.php'),
+      );
+      request.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      request.bodyFields = {'email': email, 'password': password};
+      request.followRedirects = false;
+      final response = await client.send(request).timeout(const Duration(seconds: 10));
+      final location = response.headers['location'] ?? '';
+      return response.statusCode == 302 &&
+             location.isNotEmpty &&
+             !location.contains('index.php') &&
+             !location.contains('login');
+    } catch (e) {
+      return false;
     }
   }
 
@@ -61,9 +113,7 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.all(24),
             child: Card(
               elevation: 8,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Form(
@@ -71,151 +121,101 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Logo
                       Container(
-                        width: 180,
-                        height: 70,
+                        width: 180, height: 70,
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: Colors.blue.shade50,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Image.asset(
-                          'assets/images/Pi7_Tool_splash.png',
-                          fit: BoxFit.contain,
-                        ),
+                        child: Image.asset('assets/images/Pi7_Tool_splash.png', fit: BoxFit.contain),
                       ),
                       const SizedBox(height: 16),
-                      const Text(
-                        'MyLUNAS Mobile',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF0D3B6E),
-                        ),
-                      ),
+                      Text(AppStrings.get('login_title'),
+                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0D3B6E))),
                       const SizedBox(height: 6),
-                      Text(
-                        'Log masuk untuk akses semua sistem',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
+                      Text(AppStrings.get('login_subtitle'),
+                          style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
                       const SizedBox(height: 28),
-
-                      // Email field
                       TextFormField(
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         decoration: InputDecoration(
-                          labelText: 'Email',
+                          labelText: AppStrings.get('login_email'),
                           prefixIcon: const Icon(Icons.email),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey.shade50,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          filled: true, fillColor: Colors.grey.shade50,
                         ),
                         validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Sila masukkan email';
-                          }
-                          if (!value.contains('@')) {
-                            return 'Format email tidak sah';
-                          }
+                          if (value == null || value.isEmpty) return AppStrings.get('login_email_empty');
+                          if (!value.contains('@')) return AppStrings.get('login_email_invalid');
                           return null;
                         },
                       ),
                       const SizedBox(height: 16),
-
-                      // Password field
                       TextFormField(
                         controller: _passwordController,
                         obscureText: _obscurePassword,
                         decoration: InputDecoration(
-                          labelText: 'Kata Laluan',
+                          labelText: AppStrings.get('login_password'),
                           prefixIcon: const Icon(Icons.lock),
                           suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                            ),
-                            onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword),
+                            icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                           ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey.shade50,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          filled: true, fillColor: Colors.grey.shade50,
                         ),
                         validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Sila masukkan kata laluan';
-                          }
+                          if (value == null || value.isEmpty) return AppStrings.get('login_password_empty');
                           return null;
                         },
                       ),
                       const SizedBox(height: 12),
-
-                      // Remember me
                       Row(
                         children: [
                           Checkbox(
                             value: _rememberMe,
                             activeColor: Colors.blue,
-                            onChanged: (value) =>
-                                setState(() => _rememberMe = value ?? true),
+                            onChanged: (value) => setState(() => _rememberMe = value ?? true),
                           ),
-                          const Text('Ingat Saya'),
+                          Text(AppStrings.get('login_remember')),
                           const Spacer(),
                           TextButton(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Sila hubungi admin IT'),
-                                ),
-                              );
-                            },
-                            child: const Text('Lupa Password?'),
+                            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(AppStrings.get('login_contact_admin'))),
+                            ),
+                            child: Text(AppStrings.get('login_forgot')),
                           ),
                         ],
                       ),
                       const SizedBox(height: 16),
-
-                      // Login button
                       SizedBox(
-                        width: double.infinity,
-                        height: 50,
+                        width: double.infinity, height: 50,
                         child: ElevatedButton(
                           onPressed: _isLoading ? null : _login,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF0D3B6E),
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           child: _isLoading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white)
-                              : const Text(
-                                  'LOG MASUK',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
+                              ? const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(width: 20, height: 20,
+                                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+                                    SizedBox(width: 12),
+                                    Text('...', style: TextStyle(fontSize: 14)),
+                                  ],
+                                )
+                              : Text(AppStrings.get('login_button'),
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         ),
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        'Versi 1.0.0',
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade400),
-                      ),
+                      Text(AppStrings.get('version'),
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
                     ],
                   ),
                 ),
@@ -229,97 +229,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _localeController.removeListener(() => setState(() {}));
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
-  }
-}
-
-// WebView untuk authenticate dengan E-Leave
-class _AuthWebView extends StatefulWidget {
-  final String email;
-  final String password;
-
-  const _AuthWebView({required this.email, required this.password});
-
-  @override
-  State<_AuthWebView> createState() => _AuthWebViewState();
-}
-
-class _AuthWebViewState extends State<_AuthWebView> {
-  late final WebViewController _controller;
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (_) => setState(() => _isLoading = true),
-          onPageFinished: (url) async {
-            setState(() => _isLoading = false);
-
-            // Auto inject credentials
-            if (!url.contains('user/staff') &&
-                !url.contains('dashboard')) {
-              await _controller.runJavaScript('''
-                (function() {
-                  var emailField = document.querySelector('input[name="email"]');
-                  var passField = document.querySelector('input[name="password"]');
-                  var submitBtn = document.querySelector('button[type="submit"]') ||
-                                  document.querySelector('input[type="submit"]');
-                  if (emailField && passField) {
-                    emailField.value = "${widget.email}";
-                    passField.value = "${widget.password}";
-                    if (submitBtn) submitBtn.click();
-                  }
-                })();
-              ''');
-            }
-
-            // Login berjaya
-            if (url.contains('user/staff')) {
-              await SecureStorage.saveLoginStatus();
-              if (mounted) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => const HomeScreen()),
-                );
-              }
-            }
-          },
-        ),
-      )
-      ..loadRequest(
-          Uri.parse('https://apps2.mylunas.com.my/eleave/index.php'));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D3B6E),
-      body: Stack(
-        children: [
-          WebViewWidget(controller: _controller),
-          if (_isLoading)
-            const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Colors.white),
-                  SizedBox(height: 16),
-                  Text(
-                    'Mengesahkan akaun...',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
   }
 }

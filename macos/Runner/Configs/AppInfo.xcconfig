@@ -8,7 +8,7 @@
 PRODUCT_NAME = mylunas_160326
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.mylunas160326
+PRODUCT_BUNDLE_IDENTIFIER = com.mylunas.mobile.mylunas160326
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.mylunas.mobile. All rights reserved.

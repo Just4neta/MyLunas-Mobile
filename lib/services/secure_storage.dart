@@ -5,6 +5,9 @@ class SecureStorage {
   static const String _keyUsername = 'username';
   static const String _keyPassword = 'password';
   static const String _keyIsLoggedIn = 'is_logged_in';
+  static const String _keyMarsUsername = 'mars_username';
+  static const String _keyMarsPassword = 'mars_password';
+  static const String _keyLocale = 'app_locale';
 
   static Future<void> saveLoginStatus() async {
     await _storage.write(key: _keyIsLoggedIn, value: 'true');
@@ -14,6 +17,34 @@ class SecureStorage {
     await _storage.write(key: _keyUsername, value: username);
     await _storage.write(key: _keyPassword, value: password);
     await _storage.write(key: _keyIsLoggedIn, value: 'true');
+  }
+
+  // MARS credentials
+  static Future<void> saveMarsCredentials(String username, String password) async {
+    await _storage.write(key: _keyMarsUsername, value: username);
+    await _storage.write(key: _keyMarsPassword, value: password);
+  }
+
+  static Future<String?> getMarsUsername() async {
+    return await _storage.read(key: _keyMarsUsername);
+  }
+
+  static Future<String?> getMarsPassword() async {
+    return await _storage.read(key: _keyMarsPassword);
+  }
+
+  static Future<void> clearMarsCredentials() async {
+    await _storage.delete(key: _keyMarsUsername);
+    await _storage.delete(key: _keyMarsPassword);
+  }
+
+  // Locale
+  static Future<void> saveLocale(String locale) async {
+    await _storage.write(key: _keyLocale, value: locale);
+  }
+
+  static Future<String?> getLocale() async {
+    return await _storage.read(key: _keyLocale);
   }
 
   static Future<bool> isLoggedIn() async {

@@ -1,10 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'profile_screen.dart';
 import '../services/secure_storage.dart';
+import '../l10n/app_strings.dart';
+import '../l10n/locale_controller.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final LocaleController _localeController = LocaleController();
+
+  @override
+  void initState() {
+    super.initState();
+    _localeController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _localeController.removeListener(() => setState(() {}));
+    super.dispose();
+  }
 
   static const List<Map<String, String>> menuItems = [
     {
@@ -118,6 +140,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF1565C0),
+      resizeToAvoidBottomInset: false,
       body: SafeArea(
         child: Column(
           children: [
@@ -127,22 +150,31 @@ class HomeScreen extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
               child: Row(
                 children: [
-                  // Logo
-                  Expanded(
-                    child: Image.asset(
-                      'assets/images/Pi7_Tool_splash.png',
-                      height: 45,
-                      fit: BoxFit.contain,
-                      alignment: Alignment.centerLeft,
-                    ),
-                  ),
-                  // Profile button
+                  // Exit button
                   GestureDetector(
                     onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ProfileScreen(),
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: Text(AppStrings.get('home_exit_title')),
+                          content: Text(AppStrings.get('home_exit_content')),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: Text(AppStrings.get('home_cancel')),
+                            ),
+                            ElevatedButton(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                SystemNavigator.pop();
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF0D3B6E),
+                                foregroundColor: Colors.white,
+                              ),
+                              child: Text(AppStrings.get('home_exit_confirm')),
+                            ),
+                          ],
                         ),
                       );
                     },
@@ -152,11 +184,33 @@ class HomeScreen extends StatelessWidget {
                         color: const Color(0xFF0D3B6E),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(
-                        Icons.person,
-                        color: Colors.white,
-                        size: 24,
+                      child: const Icon(Icons.exit_to_app, color: Colors.white, size: 24),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Logo
+                  Expanded(
+                    child: Image.asset(
+                      'assets/images/Pi7_Tool_splash.png',
+                      height: 45,
+                      fit: BoxFit.contain,
+                      alignment: Alignment.center,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Profile button
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const ProfileScreen()),
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0D3B6E),
+                        borderRadius: BorderRadius.circular(8),
                       ),
+                      child: const Icon(Icons.person, color: Colors.white, size: 24),
                     ),
                   ),
                 ],
@@ -179,10 +233,10 @@ class HomeScreen extends StatelessWidget {
               color: Colors.white,
               padding: const EdgeInsets.all(10),
               width: double.infinity,
-              child: const Text(
-                'Copyright © MyLUNAS 2026. Developed by LUNAS-ISD.',
+              child: Text(
+                AppStrings.get('home_footer'),
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: Colors.black54),
+                style: const TextStyle(fontSize: 11, color: Colors.black54),
               ),
             ),
           ],
@@ -197,13 +251,11 @@ class HomeScreen extends StatelessWidget {
     return GestureDetector(
       onTap: isDisabled
           ? () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Sistem ini belum tersedia buat masa ini.'),
-                  backgroundColor: Colors.orange,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(AppStrings.get('home_unavailable')),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+              ));
             }
           : () {
               bool autoLogin = item['autoLogin'] == 'true';
@@ -237,15 +289,9 @@ class HomeScreen extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 65,
-                height: 65,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Image.asset(
-                  item['image']!,
-                  fit: BoxFit.contain,
-                ),
+                width: 65, height: 65,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
+                child: Image.asset(item['image']!, fit: BoxFit.contain),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -261,13 +307,9 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
                     if (isDisabled)
-                      const Text(
-                        'Akan datang',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.orange,
-                          fontStyle: FontStyle.italic,
-                        ),
+                      Text(
+                        AppStrings.get('home_coming_soon'),
+                        style: const TextStyle(fontSize: 11, color: Colors.orange, fontStyle: FontStyle.italic),
                       ),
                   ],
                 ),
@@ -314,9 +356,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
           onPageStarted: (_) => setState(() => _isLoading = true),
           onPageFinished: (url) async {
             setState(() => _isLoading = false);
-            if (widget.autoLogin) {
-              await _tryAutoLogin(url);
-            }
+            if (widget.autoLogin) await _tryAutoLogin(url);
           },
         ),
       )
@@ -328,21 +368,39 @@ class _WebViewScreenState extends State<WebViewScreen> {
     final password = await SecureStorage.getPassword();
     if (email == null || password == null) return;
 
-    // Auto-inject credentials ke mana-mana login form
+    if (currentUrl.contains('apps2.mylunas.com.my/mars')) {
+      final marsUser = await SecureStorage.getMarsUsername();
+      final marsPass = await SecureStorage.getMarsPassword();
+      if (marsUser == null || marsUser.isEmpty) return;
+      await _controller.runJavaScript('''
+        (function() {
+          var userField = document.querySelector('input[name="username"]') ||
+                          document.querySelector('input[name="user_id"]') ||
+                          document.querySelector('input[type="text"]');
+          var passField = document.querySelector('input[name="password"]') ||
+                          document.querySelector('input[type="password"]');
+          var submitBtn = document.querySelector('button[type="submit"]') ||
+                          document.querySelector('input[type="submit"]');
+          if (userField && passField && !userField.value) {
+            userField.value = "$marsUser";
+            passField.value = "$marsPass";
+            if (submitBtn) submitBtn.click();
+          }
+        })();
+      ''');
+      return;
+    }
+
     await _controller.runJavaScript('''
       (function() {
         var emailField = document.querySelector('input[name="email"]') ||
                          document.querySelector('input[type="email"]') ||
-                         document.querySelector('input[name="username"]') ||
-                         document.querySelector('input[name="user"]') ||
-                         document.querySelector('input[name="login"]');
+                         document.querySelector('input[name="username"]');
         var passField = document.querySelector('input[name="password"]') ||
                         document.querySelector('input[type="password"]');
         var submitBtn = document.querySelector('input[name="SubmitButton"]') ||
                         document.querySelector('button[type="submit"]') ||
-                        document.querySelector('input[type="submit"]') ||
-                        document.querySelector('button[id*="login"]') ||
-                        document.querySelector('button[class*="login"]');
+                        document.querySelector('input[type="submit"]');
         if (emailField && passField && !emailField.value) {
           emailField.value = "$email";
           passField.value = "$password";
@@ -363,8 +421,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
       body: Stack(
         children: [
           WebViewWidget(controller: _controller),
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator()),
+          if (_isLoading) const Center(child: CircularProgressIndicator()),
         ],
       ),
     );
