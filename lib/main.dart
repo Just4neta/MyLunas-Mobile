@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/splash_screen.dart';
 import 'l10n/locale_controller.dart';
-import 'l10n/app_strings.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,10 +27,10 @@ class _MyLunasAppState extends State<MyLunasApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'MyLUNAS Mobile',
-      home: const SplashScreen(),
+      home: SplashScreen(),
     );
   }
 

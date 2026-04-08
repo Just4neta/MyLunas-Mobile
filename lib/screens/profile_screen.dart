@@ -211,7 +211,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           child: Column(
                             children: [
-                              Text('🇲🇾', style: const TextStyle(fontSize: 22)),
+                              const Text('🇲🇾', style: TextStyle(fontSize: 22)),
                               const SizedBox(height: 4),
                               Text(
                                 'Bahasa Melayu',
@@ -250,7 +250,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           child: Column(
                             children: [
-                              Text('🇬🇧', style: const TextStyle(fontSize: 22)),
+                              const Text('🇬🇧', style: TextStyle(fontSize: 22)),
                               const SizedBox(height: 4),
                               Text(
                                 'English',
