@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -69,7 +70,13 @@ class _QuoteScreenState extends State<QuoteScreen>
   }
 
   void _exitApp() {
-    SystemNavigator.pop();
+    if (Platform.isAndroid) {
+      SystemNavigator.pop();
+    } else {
+      // iOS tidak benarkan force close
+      // Minimize ke home screen
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
   }
 
   @override

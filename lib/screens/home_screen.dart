@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -166,7 +167,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             ElevatedButton(
                               onPressed: () {
                                 Navigator.pop(context);
-                                SystemNavigator.pop();
+                                if (Platform.isAndroid) {
+                                  SystemNavigator.pop();
+                                } else {
+                                  Navigator.of(context).popUntil((route) => route.isFirst);
+                                }
                               },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF0D3B6E),
