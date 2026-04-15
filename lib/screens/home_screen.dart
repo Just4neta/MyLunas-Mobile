@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:file_picker/file_picker.dart';
 import 'profile_screen.dart';
 import '../services/secure_storage.dart';
 import '../l10n/app_strings.dart';
@@ -125,6 +127,13 @@ class _HomeScreenState extends State<HomeScreen> {
       'title': 'E-Suggestion Box',
       'image': 'assets/images/logoMock_suggest.png',
       'url': 'https://forms.office.com/r/4QPVanVerA',
+      'disabled': 'false',
+      'autoLogin': 'true',
+    },
+    {
+      'title': 'People Movement',
+      'image': 'assets/images/people.png',
+      'url': 'https://apps2.mylunas.com.my/mylunas/dashboard/',
       'disabled': 'false',
       'autoLogin': 'true',
     },
@@ -356,6 +365,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent(
+        'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) => setState(() => _isLoading = true),
@@ -363,9 +375,55 @@ class _WebViewScreenState extends State<WebViewScreen> {
             setState(() => _isLoading = false);
             if (widget.autoLogin) await _tryAutoLogin(url);
           },
+          onWebResourceError: (error) {
+            setState(() => _isLoading = false);
+          },
         ),
       )
       ..loadRequest(Uri.parse(widget.url));
+
+    // Enable file upload for Android
+    if (Platform.isAndroid) {
+      final androidController = _controller.platform as AndroidWebViewController;
+      androidController.setOnShowFileSelector((params) async {
+        try {
+          FilePickerResult? result;
+
+          // Check accept types
+          bool imageOnly = params.acceptTypes.isNotEmpty &&
+              params.acceptTypes.every((type) =>
+                  type.contains('image') && !type.contains('*'));
+
+          if (imageOnly) {
+            result = await FilePicker.platform.pickFiles(
+              type: FileType.image,
+              allowMultiple: params.mode == FileSelectorMode.openMultiple,
+              withData: false,
+              withReadStream: false,
+            );
+          } else {
+            result = await FilePicker.platform.pickFiles(
+              type: FileType.any,
+              allowMultiple: params.mode == FileSelectorMode.openMultiple,
+              withData: false,
+              withReadStream: false,
+            );
+          }
+
+          if (result != null && result.files.isNotEmpty) {
+            // Convert paths to proper file:// URIs
+            final uris = result.files
+                .where((f) => f.path != null)
+                .map((f) => Uri.file(f.path!).toString())
+                .toList();
+            return uris;
+          }
+        } catch (e) {
+          debugPrint('File picker error: $e');
+        }
+        return [];
+      });
+    }
   }
 
   Future<void> _tryAutoLogin(String currentUrl) async {
