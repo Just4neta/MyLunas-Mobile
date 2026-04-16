@@ -1,1 +1,1 @@
-package com.lunasnavalshipyard.mylunas
+package com.mylunas.mobile 
