@@ -89,7 +89,7 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.mylunas.mobile " "\0"
+            VALUE "CompanyName", "com.mylunas.mobile" "\0"
             VALUE "FileDescription", "mylunas_160326" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "mylunas_160326" "\0"
