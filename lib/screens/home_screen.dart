@@ -368,6 +368,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
       ..setUserAgent(
         'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
       )
+      ..setOnPermissionRequest((request) {
+        request.grant();
+      })
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) => setState(() => _isLoading = true),
