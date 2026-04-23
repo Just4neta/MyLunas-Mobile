@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'login_screen.dart';
 import 'quote_screen.dart';
 import '../services/secure_storage.dart';
@@ -49,10 +51,29 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    // Navigate immediately after first frame — no delay
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _requestPermissions();
       _checkLoginStatus();
     });
+  }
+
+  Future<void> _requestPermissions() async {
+    if (Platform.isAndroid) {
+      await [
+        Permission.camera,
+        Permission.microphone,
+        Permission.location,
+        Permission.photos,
+        Permission.storage,
+      ].request();
+    } else if (Platform.isIOS) {
+      await [
+        Permission.camera,
+        Permission.microphone,
+        Permission.locationWhenInUse,
+        Permission.photos,
+      ].request();
+    }
   }
 
   Future<void> _checkLoginStatus() async {
@@ -101,7 +122,6 @@ class _SplashScreenState extends State<SplashScreen>
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Logo LUNAS
                         Container(
                           width: 220,
                           height: 100,
@@ -123,7 +143,6 @@ class _SplashScreenState extends State<SplashScreen>
                           ),
                         ),
                         const SizedBox(height: 32),
-                        // Nama app
                         const Text(
                           'MyLUNAS Mobile',
                           style: TextStyle(
@@ -143,7 +162,6 @@ class _SplashScreenState extends State<SplashScreen>
                           ),
                         ),
                         const SizedBox(height: 60),
-                        // Loading indicator
                         SizedBox(
                           width: 40,
                           height: 40,
@@ -154,7 +172,7 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Versi 1.0.0',
+                          'Versi 1.0.1',
                           style: TextStyle(
                             color: Colors.white.withOpacity(0.5),
                             fontSize: 12,

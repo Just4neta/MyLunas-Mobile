@@ -31,7 +31,13 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>MyLUNAS Mobile needs access to save photos to your library.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>MyLUNAS Mobile needs access to your camera to allow you to take photos for upload.</string>
+	<string>MyLUNAS Mobile needs camera access for face recognition and document capture in internal LUNAS systems.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>MyLUNAS Mobile needs location access for internal LUNAS systems that require geolocation.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>MyLUNAS Mobile needs location access for internal LUNAS systems that require geolocation.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MyLUNAS Mobile needs microphone access for internal LUNAS systems.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

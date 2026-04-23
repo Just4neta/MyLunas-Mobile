@@ -1,176 +1,126 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import '../services/secure_storage.dart';
 
 class WebViewScreen extends StatefulWidget {
   final String title;
   final String url;
-  final IconData icon;
-  final Color color;
+  final bool autoLogin;
 
   const WebViewScreen({
     super.key,
     required this.title,
     required this.url,
-    required this.icon,
-    required this.color,
+    this.autoLogin = false,
   });
 
   @override
-  _WebViewScreenState createState() => _WebViewScreenState();
+  State<WebViewScreen> createState() => _WebViewScreenState();
 }
 
 class _WebViewScreenState extends State<WebViewScreen> {
-  late final WebViewController _controller;
+  InAppWebViewController? _webViewController;
   bool _isLoading = true;
-  double _progress = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0x00000000))
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onProgress: (int progress) {
-            setState(() {
-              _progress = progress / 100;
-            });
-          },
-          onPageStarted: (String url) {
-            setState(() {
-              _isLoading = true;
-            });
-          },
-          onPageFinished: (String url) {
-            setState(() {
-              _isLoading = false;
-            });
-            
-            // Suntik JavaScript untuk pengalaman mobile lebih baik
-            _controller.runJavaScript('''
-              // Pastikan viewport sesuai untuk mobile
-              var meta = document.createElement('meta');
-              meta.name = 'viewport';
-              meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-              document.getElementsByTagName('head')[0].appendChild(meta);
-              
-              // Sembunyikan elemen yang mungkin mengganggu
-              setTimeout(function() {
-                // Cuba sembunyikan header/footer jika ada
-                var elements = document.querySelectorAll('header, footer, .header, .footer, nav, .navbar');
-                elements.forEach(function(el) {
-                  if (el) el.style.display = 'none';
-                });
-              }, 1000);
-            ''');
-          },
-          onWebResourceError: (error) {
-            setState(() {
-              _isLoading = false;
-            });
-            
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Ralat memuatkan: ${error.description}'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(widget.url));
+  final InAppWebViewSettings _settings = InAppWebViewSettings(
+    javaScriptEnabled: true,
+    mediaPlaybackRequiresUserGesture: false,
+    allowsInlineMediaPlayback: true,
+    useHybridComposition: true,
+    userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  );
+
+  Future<void> _tryAutoLogin(String currentUrl) async {
+    final email = await SecureStorage.getUsername();
+    final password = await SecureStorage.getPassword();
+    if (email == null || password == null) return;
+
+    if (currentUrl.contains('apps2.mylunas.com.my/mars')) {
+      final marsUser = await SecureStorage.getMarsUsername();
+      final marsPass = await SecureStorage.getMarsPassword();
+      if (marsUser == null || marsUser.isEmpty) return;
+      await _webViewController?.evaluateJavascript(source: '''
+        (function() {
+          var userField = document.querySelector('input[name="username"]') ||
+                          document.querySelector('input[name="user_id"]') ||
+                          document.querySelector('input[type="text"]');
+          var passField = document.querySelector('input[name="password"]') ||
+                          document.querySelector('input[type="password"]');
+          var submitBtn = document.querySelector('button[type="submit"]') ||
+                          document.querySelector('input[type="submit"]');
+          if (userField && passField && !userField.value) {
+            userField.value = "$marsUser";
+            passField.value = "$marsPass";
+            if (submitBtn) submitBtn.click();
+          }
+        })();
+      ''');
+      return;
+    }
+
+    await _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var emailField = document.querySelector('input[name="email"]') ||
+                         document.querySelector('input[type="email"]') ||
+                         document.querySelector('input[name="username"]');
+        var passField = document.querySelector('input[name="password"]') ||
+                        document.querySelector('input[type="password"]');
+        var submitBtn = document.querySelector('input[name="SubmitButton"]') ||
+                        document.querySelector('button[type="submit"]') ||
+                        document.querySelector('input[type="submit"]');
+        if (emailField && passField && !emailField.value) {
+          emailField.value = "$email";
+          passField.value = "$password";
+          if (submitBtn) submitBtn.click();
+        }
+      })();
+    ''');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                widget.icon,
-                size: 18,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                widget.title,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: widget.color,
+        title: Text(widget.title),
+        backgroundColor: const Color(0xFF0D3B6E),
         foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          // Butang Refresh
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _controller.reload();
-            },
-          ),
-          // Butang Buka dalam Browser
-          IconButton(
-            icon: const Icon(Icons.open_in_browser),
-            onPressed: () {
-              // Buka dalam browser luar
-              _showExternalBrowserDialog();
-            },
-          ),
-        ],
-        bottom: _isLoading && _progress < 1.0
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(3),
-                child: LinearProgressIndicator(
-                  value: _progress,
-                  backgroundColor: Colors.white.withOpacity(0.3),
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              )
-            : null,
       ),
-      body: WebViewWidget(
-        controller: _controller,
-      ),
-    );
-  }
-
-  void _showExternalBrowserDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Buka dalam Browser'),
-        content: const Text('Anda pasti mahu buka pautan ini dalam browser luar?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('BATAL'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // Di sini anda boleh guna url_launcher untuk buka browser
-              // Tapi untuk sekarang, kita tunjuk mesej
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Fungsi ini akan ditambah kemudian'),
-                ),
+      body: Stack(
+        children: [
+          InAppWebView(
+            initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+            initialSettings: _settings,
+            onWebViewCreated: (controller) {
+              _webViewController = controller;
+            },
+            onLoadStart: (controller, url) {
+              setState(() => _isLoading = true);
+            },
+            onLoadStop: (controller, url) async {
+              setState(() => _isLoading = false);
+              if (widget.autoLogin && url != null) {
+                await _tryAutoLogin(url.toString());
+              }
+            },
+            onReceivedError: (controller, request, error) {
+              setState(() => _isLoading = false);
+            },
+            onPermissionRequest: (controller, request) async {
+              return PermissionResponse(
+                resources: request.resources,
+                action: PermissionResponseAction.GRANT,
               );
             },
-            child: const Text('BUKA'),
+            onGeolocationPermissionsShowPrompt: (controller, origin) async {
+              return GeolocationPermissionShowPromptResponse(
+                origin: origin,
+                allow: true,
+                retain: true,
+              );
+            },
           ),
+          if (_isLoading)
+            const Center(child: CircularProgressIndicator()),
         ],
       ),
     );

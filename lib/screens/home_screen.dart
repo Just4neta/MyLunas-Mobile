@@ -1,8 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:file_picker/file_picker.dart';
 import 'profile_screen.dart';
 import '../services/secure_storage.dart';
@@ -339,7 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// WebView Screen
+// WebView Screen — uses flutter_inappwebview for full camera/permission support
 class WebViewScreen extends StatefulWidget {
   final String title;
   final String url;
@@ -357,84 +356,16 @@ class WebViewScreen extends StatefulWidget {
 }
 
 class _WebViewScreenState extends State<WebViewScreen> {
-  late final WebViewController _controller;
+  InAppWebViewController? _webViewController;
   bool _isLoading = true;
 
-  @override
-  void initState() {
-    super.initState();
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent(
-        'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-      )
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (_) => setState(() => _isLoading = true),
-          onPageFinished: (url) async {
-            setState(() => _isLoading = false);
-            if (widget.autoLogin) await _tryAutoLogin(url);
-          },
-          onWebResourceError: (error) {
-            setState(() => _isLoading = false);
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(widget.url));
-
-    // Enable file upload for Android
-    if (Platform.isAndroid) {
-      final androidController = _controller.platform as AndroidWebViewController;
-      // Grant camera and location permissions from WebView
-      androidController.setGeolocationPermissionsPromptCallbacks(
-        onShowPrompt: (request) async {
-          return GeolocationPermissionsResponse(
-            allow: true,
-            retain: true,
-          );
-        },
-        onHidePrompt: () {},
-      );
-      androidController.setOnShowFileSelector((params) async {
-        try {
-          FilePickerResult? result;
-
-          // Check accept types
-          bool imageOnly = params.acceptTypes.isNotEmpty &&
-              params.acceptTypes.every((type) =>
-                  type.contains('image') && !type.contains('*'));
-
-          if (imageOnly) {
-            result = await FilePicker.platform.pickFiles(
-              type: FileType.image,
-              allowMultiple: params.mode == FileSelectorMode.openMultiple,
-              withData: false,
-              withReadStream: false,
-            );
-          } else {
-            result = await FilePicker.platform.pickFiles(
-              type: FileType.any,
-              allowMultiple: params.mode == FileSelectorMode.openMultiple,
-              withData: false,
-              withReadStream: false,
-            );
-          }
-
-          if (result != null && result.files.isNotEmpty) {
-            // Convert paths to proper file:// URIs
-            final uris = result.files
-                .where((f) => f.path != null)
-                .map((f) => Uri.file(f.path!).toString())
-                .toList();
-            return uris;
-          }
-        } catch (e) {
-          debugPrint('File picker error: $e');
-        }
-        return [];
-      });
-    }
-  }
+  final InAppWebViewSettings _settings = InAppWebViewSettings(
+    javaScriptEnabled: true,
+    mediaPlaybackRequiresUserGesture: false,
+    allowsInlineMediaPlayback: true,
+    useHybridComposition: true,
+    userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  );
 
   Future<void> _tryAutoLogin(String currentUrl) async {
     final email = await SecureStorage.getUsername();
@@ -445,7 +376,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
       final marsUser = await SecureStorage.getMarsUsername();
       final marsPass = await SecureStorage.getMarsPassword();
       if (marsUser == null || marsUser.isEmpty) return;
-      await _controller.runJavaScript('''
+      await _webViewController?.evaluateJavascript(source: '''
         (function() {
           var userField = document.querySelector('input[name="username"]') ||
                           document.querySelector('input[name="user_id"]') ||
@@ -464,7 +395,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
       return;
     }
 
-    await _controller.runJavaScript('''
+    await _webViewController?.evaluateJavascript(source: '''
       (function() {
         var emailField = document.querySelector('input[name="email"]') ||
                          document.querySelector('input[type="email"]') ||
@@ -493,8 +424,42 @@ class _WebViewScreenState extends State<WebViewScreen> {
       ),
       body: Stack(
         children: [
-          WebViewWidget(controller: _controller),
-          if (_isLoading) const Center(child: CircularProgressIndicator()),
+          InAppWebView(
+            initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+            initialSettings: _settings,
+            onWebViewCreated: (controller) {
+              _webViewController = controller;
+            },
+            onLoadStart: (controller, url) {
+              setState(() => _isLoading = true);
+            },
+            onLoadStop: (controller, url) async {
+              setState(() => _isLoading = false);
+              if (widget.autoLogin && url != null) {
+                await _tryAutoLogin(url.toString());
+              }
+            },
+            onReceivedError: (controller, request, error) {
+              setState(() => _isLoading = false);
+            },
+            // Auto-grant all permissions — camera, microphone, location
+            onPermissionRequest: (controller, request) async {
+              return PermissionResponse(
+                resources: request.resources,
+                action: PermissionResponseAction.GRANT,
+              );
+            },
+            // Auto-grant geolocation
+            onGeolocationPermissionsShowPrompt: (controller, origin) async {
+              return GeolocationPermissionShowPromptResponse(
+                origin: origin,
+                allow: true,
+                retain: true,
+              );
+            },
+          ),
+          if (_isLoading)
+            const Center(child: CircularProgressIndicator()),
         ],
       ),
     );
