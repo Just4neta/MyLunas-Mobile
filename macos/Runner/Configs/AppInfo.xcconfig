@@ -8,7 +8,7 @@
 PRODUCT_NAME = mylunas_160326
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.lunasnavalshipyard.mylunas 
+PRODUCT_BUNDLE_IDENTIFIER = com.mylunas.mobile 
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.lunasnavalshipyard.mylunas . All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.mylunas.mobile . All rights reserved.
