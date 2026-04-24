@@ -27,6 +27,10 @@ class _WebViewScreenState extends State<WebViewScreen> {
     mediaPlaybackRequiresUserGesture: false,
     allowsInlineMediaPlayback: true,
     useHybridComposition: true,
+    javaScriptCanOpenWindowsAutomatically: true,
+    allowsBackForwardNavigationGestures: true,
+    supportZoom: true,
+    builtInZoomControls: false,
     userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   );
 

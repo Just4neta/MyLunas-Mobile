@@ -358,12 +358,18 @@ class WebViewScreen extends StatefulWidget {
 class _WebViewScreenState extends State<WebViewScreen> {
   InAppWebViewController? _webViewController;
   bool _isLoading = true;
+  String _currentUrl = '';
 
   final InAppWebViewSettings _settings = InAppWebViewSettings(
     javaScriptEnabled: true,
     mediaPlaybackRequiresUserGesture: false,
     allowsInlineMediaPlayback: true,
     useHybridComposition: true,
+    javaScriptCanOpenWindowsAutomatically: true,
+    allowsBackForwardNavigationGestures: true,
+    supportZoom: true,
+    builtInZoomControls: false,
+    cacheEnabled: true,
     userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   );
 
@@ -431,13 +437,32 @@ class _WebViewScreenState extends State<WebViewScreen> {
               _webViewController = controller;
             },
             onLoadStart: (controller, url) {
+              if (url != null) _currentUrl = url.toString();
               setState(() => _isLoading = true);
             },
             onLoadStop: (controller, url) async {
+              if (url != null) _currentUrl = url.toString();
               setState(() => _isLoading = false);
               if (widget.autoLogin && url != null) {
                 await _tryAutoLogin(url.toString());
               }
+            },
+            shouldOverrideUrlLoading: (controller, navigationAction) async {
+              final uri = navigationAction.request.url;
+              if (uri == null) return NavigationActionPolicy.ALLOW;
+              final urlStr = uri.toString();
+
+              // Handle relative URL using cached _currentUrl — no async delay
+              if (!urlStr.startsWith('http') && _currentUrl.isNotEmpty) {
+                final baseUri = Uri.parse(_currentUrl);
+                final basePath = baseUri.path.contains('/')
+                    ? baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)
+                    : '/';
+                final fullUrl = '${baseUri.scheme}://${baseUri.host}$basePath$urlStr';
+                controller.loadUrl(urlRequest: URLRequest(url: WebUri(fullUrl)));
+                return NavigationActionPolicy.CANCEL;
+              }
+              return NavigationActionPolicy.ALLOW;
             },
             onReceivedError: (controller, request, error) {
               setState(() => _isLoading = false);
