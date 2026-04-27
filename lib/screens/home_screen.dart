@@ -446,15 +446,45 @@ class _WebViewScreenState extends State<WebViewScreen> {
               if (widget.autoLogin && url != null) {
                 await _tryAutoLogin(url.toString());
               }
+
+              // Detect blank/white page and redirect to dashboard
+              final urlStr = url?.toString() ?? '';
+              if (urlStr == 'about:blank' || urlStr.isEmpty) {
+                final baseUri = Uri.parse(widget.url);
+                final dashboardUrl = '${baseUri.scheme}://${baseUri.host}${baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)}index.php';
+                await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
+                return;
+              }
+
+              // Check if page body is empty (white screen)
+              final bodyContent = await controller.evaluateJavascript(
+                source: 'document.body ? document.body.innerHTML.trim().length : -1'
+              );
+              if (bodyContent != null && bodyContent.toString() == '0') {
+                final baseUri = Uri.parse(widget.url);
+                final dashboardUrl = '${baseUri.scheme}://${baseUri.host}${baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)}index.php';
+                await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
+              }
             },
             shouldOverrideUrlLoading: (controller, navigationAction) async {
               final uri = navigationAction.request.url;
               if (uri == null) return NavigationActionPolicy.ALLOW;
               final urlStr = uri.toString();
 
-              // Handle relative URL using cached _currentUrl — no async delay
-              if (!urlStr.startsWith('http') && _currentUrl.isNotEmpty) {
-                final baseUri = Uri.parse(_currentUrl);
+              // Only intercept pure relative URLs like 'index.php'
+              if (!urlStr.startsWith('http') &&
+                  !urlStr.startsWith('about:') &&
+                  !urlStr.startsWith('javascript:') &&
+                  !urlStr.startsWith('data:') &&
+                  !urlStr.startsWith('blob:') &&
+                  _currentUrl.isNotEmpty) {
+
+                // Use widget.url as base if currentUrl is blob or non-http
+                final baseUrlStr = _currentUrl.startsWith('http')
+                    ? _currentUrl
+                    : widget.url;
+
+                final baseUri = Uri.parse(baseUrlStr);
                 final basePath = baseUri.path.contains('/')
                     ? baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)
                     : '/';
