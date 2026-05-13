@@ -137,6 +137,13 @@ class _HomeScreenState extends State<HomeScreen> {
       'autoLogin': 'true',
     },
     {
+      'title': 'Visitor Scanner',
+      'image': 'assets/images/visitor_scanner.png',
+      'url': 'https://apps2.mylunas.com.my/lunasitor/history.php',
+      'disabled': 'false',
+      'autoLogin': 'true',
+    },
+    {
       'title': 'Risk Management',
       'image': 'assets/images/lockmock_risk.png',
       'url': '',
@@ -370,6 +377,13 @@ class _WebViewScreenState extends State<WebViewScreen> {
     supportZoom: true,
     builtInZoomControls: false,
     cacheEnabled: true,
+    cacheMode: CacheMode.LOAD_CACHE_ELSE_NETWORK,
+    hardwareAcceleration: true,
+    domStorageEnabled: true,
+    databaseEnabled: true,
+    allowFileAccessFromFileURLs: true,
+    allowUniversalAccessFromFileURLs: true,
+    mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
     userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   );
 
