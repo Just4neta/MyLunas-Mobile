@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.mylunas.mobile" "\0"
+            VALUE "CompanyName", "com.mylunas.mobile " "\0"
             VALUE "FileDescription", "mylunas_160326" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "mylunas_160326" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.mylunas.mobile . All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.mylunas.mobile  . All rights reserved." "\0"
             VALUE "OriginalFilename", "mylunas_160326.exe" "\0"
             VALUE "ProductName", "mylunas_160326" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

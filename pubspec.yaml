@@ -1,7 +1,7 @@
 name: mylunas_new
 description: Aplikasi mobile MyLUNAS untuk kemudahan staf
 publish_to: 'none'
-version: 1.0.2+21
+version: 1.0.2+24
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -12,6 +12,9 @@ dependencies:
   flutter_secure_storage: ^9.0.0
   http: ^1.1.0
   flutter_inappwebview: ^6.0.0
+  url_launcher: ^6.2.4
+  path_provider: ^2.1.2
+  open_file: ^3.3.2
   cupertino_icons: ^1.0.6
   image_picker: ^1.0.4
   file_picker: ^8.0.0+1

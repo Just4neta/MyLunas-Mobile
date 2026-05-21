@@ -6,17 +6,20 @@
 
     <!-- Camera — required for MyDEX face recognition and WebView camera -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+
+    <!-- Microphone -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
     <!-- Location — required for MyDEX and other systems that use geolocation -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
-    <!-- Storage — required for file upload and profile photo -->
+    <!-- Storage — required for file upload, profile photo and downloads -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29"/>
 
     <application
         android:label="MyLUNAS Mobile"

@@ -42,10 +42,12 @@ android {
     }
 
     buildTypes {
-        release {
-            signingConfig = signingConfigs.getByName("release")
-        }
+    release {
+        isMinifyEnabled = false
+        isShrinkResources = false
+        signingConfig = signingConfigs.getByName("release")
     }
+   }
 }
 
 flutter {

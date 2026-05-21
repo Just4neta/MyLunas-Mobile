@@ -1,8 +1,12 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_file/open_file.dart';
 import 'profile_screen.dart';
 import '../services/secure_storage.dart';
 import '../l10n/app_strings.dart';
@@ -384,6 +388,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
     allowFileAccessFromFileURLs: true,
     allowUniversalAccessFromFileURLs: true,
     mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+    useOnDownloadStart: true,
     userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   );
 
@@ -436,54 +441,188 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-        backgroundColor: const Color(0xFF0D3B6E),
-        foregroundColor: Colors.white,
-      ),
-      body: Stack(
-        children: [
-          InAppWebView(
-            initialUrlRequest: URLRequest(url: WebUri(widget.url)),
-            initialSettings: _settings,
-            onWebViewCreated: (controller) {
-              _webViewController = controller;
-            },
-            onLoadStart: (controller, url) {
-              if (url != null) _currentUrl = url.toString();
-              setState(() => _isLoading = true);
-            },
-            onLoadStop: (controller, url) async {
-              if (url != null) _currentUrl = url.toString();
-              setState(() => _isLoading = false);
-              if (widget.autoLogin && url != null) {
-                await _tryAutoLogin(url.toString());
-              }
+    return WillPopScope(
+      onWillPop: () async {
+        // Check if WebView can go back — navigate within WebView first
+        if (_webViewController != null) {
+          bool canGoBack = await _webViewController!.canGoBack();
+          if (canGoBack) {
+            await _webViewController!.goBack();
+            return false; // Don't pop the screen
+          }
+        }
+        return true; // Pop the screen if no more history
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.title),
+          backgroundColor: const Color(0xFF0D3B6E),
+          foregroundColor: Colors.white,
+        ),
+        body: Stack(
+          children: [
+            InAppWebView(
+              initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+              initialSettings: _settings,
+              onWebViewCreated: (controller) {
+                _webViewController = controller;
 
-              // Detect blank/white page and redirect to dashboard
-              final urlStr = url?.toString() ?? '';
-              if (urlStr == 'about:blank' || urlStr.isEmpty) {
-                final baseUri = Uri.parse(widget.url);
-                final dashboardUrl = '${baseUri.scheme}://${baseUri.host}${baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)}index.php';
-                await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
-                return;
-              }
+                // Handle blob download
+                controller.addJavaScriptHandler(
+                  handlerName: 'blobDownload',
+                  callback: (args) async {
+                    if (args.isEmpty) return;
+                    try {
+                      final base64Data = args[0] as String;
+                      final fileName = args.length > 1 ? args[1] as String : 'download.xlsx';
 
-              // Check if page body is empty (white screen)
-              final bodyContent = await controller.evaluateJavascript(
-                source: 'document.body ? document.body.innerHTML.trim().length : -1'
-              );
-              if (bodyContent != null && bodyContent.toString() == '0') {
-                final baseUri = Uri.parse(widget.url);
-                final dashboardUrl = '${baseUri.scheme}://${baseUri.host}${baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)}index.php';
-                await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
-              }
-            },
-            shouldOverrideUrlLoading: (controller, navigationAction) async {
+                      final bytes = base64Decode(base64Data);
+
+                      // Save to app documents directory
+                      final dir = await getApplicationDocumentsDirectory();
+                      final file = File('${dir.path}/$fileName');
+                      await file.writeAsBytes(bytes);
+
+                      // Open file using OpenFile — handles content:// URI properly
+                      final result = await OpenFile.open(file.path);
+                      debugPrint('OpenFile result: ${result.message}');
+
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Downloaded: $fileName'),
+                            backgroundColor: Colors.green,
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      debugPrint('Blob download error: $e');
+                    }
+                  },
+                );
+
+                // Add JS handler for print button
+                controller.addJavaScriptHandler(
+                  handlerName: 'printHandler',
+                  callback: (args) async {
+                    final url = _currentUrl.isNotEmpty ? _currentUrl : widget.url;
+                    final uri = Uri.parse(url);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                );
+              },
+              onDownloadStartRequest: (controller, downloadStartRequest) async {
+                final url = downloadStartRequest.url.toString();
+                if (url.startsWith('blob:')) {
+                  final fileName = downloadStartRequest.suggestedFilename ?? 'download.xlsx';
+                  await controller.evaluateJavascript(source: '''
+                    (function() {
+                      fetch("$url")
+                        .then(r => r.blob())
+                        .then(blob => {
+                          var reader = new FileReader();
+                          reader.onloadend = function() {
+                            var base64 = reader.result.split(",")[1];
+                            window.flutter_inappwebview.callHandler("blobDownload", base64, "$fileName");
+                          };
+                          reader.readAsDataURL(blob);
+                        });
+                    })();
+                  ''');
+                } else {
+                  final uri = Uri.parse(url);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                }
+              },
+              onLoadStart: (controller, url) {
+                if (url != null) _currentUrl = url.toString();
+                setState(() => _isLoading = true);
+              },
+              onLoadStop: (controller, url) async {
+                if (url != null) _currentUrl = url.toString();
+                setState(() => _isLoading = false);
+                if (widget.autoLogin && url != null) {
+                  await _tryAutoLogin(url.toString());
+                }
+
+                // Detect blank/white page and redirect to dashboard
+                final urlStr = url?.toString() ?? '';
+                if (urlStr == 'about:blank' || urlStr.isEmpty) {
+                  final baseUri = Uri.parse(widget.url);
+                  final dashboardUrl = '${baseUri.scheme}://${baseUri.host}${baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)}index.php';
+                  await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
+                  return;
+                }
+
+                // Check if page body is empty (white screen)
+                final bodyContent = await controller.evaluateJavascript(
+                  source: 'document.body ? document.body.innerHTML.trim().length : -1'
+                );
+                if (bodyContent != null && bodyContent.toString() == '0') {
+                  final baseUri = Uri.parse(widget.url);
+                  final dashboardUrl = '${baseUri.scheme}://${baseUri.host}${baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)}index.php';
+                  await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
+                }
+
+                // Inject print handler — intercept window.print() and open in browser
+                await controller.evaluateJavascript(source: '''
+                  (function() {
+                    // Override window.print
+                    window.print = function() {
+                      window.flutter_inappwebview.callHandler("printHandler");
+                    };
+
+                    // Intercept all print button clicks
+                    document.addEventListener("click", function(e) {
+                      var el = e.target;
+                      while (el) {
+                        var onclick = el.getAttribute ? el.getAttribute("onclick") : "";
+                        var href = el.href || "";
+                        if ((onclick && onclick.toLowerCase().includes("print")) ||
+                            href.toLowerCase().includes("print") ||
+                            href.toLowerCase().endsWith(".pdf")) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          window.flutter_inappwebview.callHandler("printHandler");
+                          break;
+                        }
+                        el = el.parentElement;
+                      }
+                    }, true);
+                  })();
+                ''');
+              },
+              shouldOverrideUrlLoading: (controller, navigationAction) async {
               final uri = navigationAction.request.url;
               if (uri == null) return NavigationActionPolicy.ALLOW;
               final urlStr = uri.toString();
+
+              // Intercept print/view result pages — open in external browser
+              if (urlStr.contains('view_insp_result') ||
+                  urlStr.contains('print') ||
+                  urlStr.toLowerCase().endsWith('.pdf')) {
+                // Build full URL if relative
+                String fullUrl = urlStr;
+                if (!urlStr.startsWith('http')) {
+                  final baseUrlStr = _currentUrl.startsWith('http')
+                      ? _currentUrl : widget.url;
+                  final baseUri = Uri.parse(baseUrlStr);
+                  final basePath = baseUri.path.contains('/')
+                      ? baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)
+                      : '/';
+                  fullUrl = '${baseUri.scheme}://${baseUri.host}$basePath$urlStr';
+                }
+                final launchUri = Uri.parse(fullUrl);
+                if (await canLaunchUrl(launchUri)) {
+                  await launchUrl(launchUri, mode: LaunchMode.externalApplication);
+                }
+                return NavigationActionPolicy.CANCEL;
+              }
 
               // Only intercept pure relative URLs like 'index.php'
               if (!urlStr.startsWith('http') &&
@@ -492,45 +631,55 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   !urlStr.startsWith('data:') &&
                   !urlStr.startsWith('blob:') &&
                   _currentUrl.isNotEmpty) {
-
-                // Use widget.url as base if currentUrl is blob or non-http
                 final baseUrlStr = _currentUrl.startsWith('http')
-                    ? _currentUrl
-                    : widget.url;
-
+                    ? _currentUrl : widget.url;
                 final baseUri = Uri.parse(baseUrlStr);
                 final basePath = baseUri.path.contains('/')
                     ? baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)
                     : '/';
-                final fullUrl = '${baseUri.scheme}://${baseUri.host}$basePath$urlStr';
-                controller.loadUrl(urlRequest: URLRequest(url: WebUri(fullUrl)));
+                final fullUrl2 = '${baseUri.scheme}://${baseUri.host}$basePath$urlStr';
+                controller.loadUrl(urlRequest: URLRequest(url: WebUri(fullUrl2)));
                 return NavigationActionPolicy.CANCEL;
               }
               return NavigationActionPolicy.ALLOW;
             },
-            onReceivedError: (controller, request, error) {
-              setState(() => _isLoading = false);
-            },
-            // Auto-grant all permissions — camera, microphone, location
-            onPermissionRequest: (controller, request) async {
-              return PermissionResponse(
-                resources: request.resources,
-                action: PermissionResponseAction.GRANT,
-              );
-            },
-            // Auto-grant geolocation
-            onGeolocationPermissionsShowPrompt: (controller, origin) async {
-              return GeolocationPermissionShowPromptResponse(
-                origin: origin,
-                allow: true,
-                retain: true,
-              );
-            },
-          ),
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator()),
-        ],
+              onReceivedError: (controller, request, error) {
+                setState(() => _isLoading = false);
+              },
+              onPermissionRequest: (controller, request) async {
+                return PermissionResponse(
+                  resources: request.resources,
+                  action: PermissionResponseAction.GRANT,
+                );
+              },
+              onGeolocationPermissionsShowPrompt: (controller, origin) async {
+                return GeolocationPermissionShowPromptResponse(
+                  origin: origin,
+                  allow: true,
+                  retain: true,
+                );
+              },
+            ),
+            if (_isLoading)
+              const Center(child: CircularProgressIndicator()),
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> _openPdf(String url) async {
+    try {
+      // Open PDF URL in external browser/viewer
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        // Fallback — load in WebView
+        await _webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+      }
+    } catch (e) {
+      debugPrint('PDF open error: $e');
+    }
   }
 }

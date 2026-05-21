@@ -1,0 +1,3 @@
+-keep class com.baseflow.permissionhandler.** { *; }
+-keep class com.pichillilorenzo.flutter_inappwebview.** { *; }
+-keep class io.flutter.** { *; }

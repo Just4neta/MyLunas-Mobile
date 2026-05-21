@@ -63,7 +63,6 @@ class _SplashScreenState extends State<SplashScreen>
         Permission.camera,
         Permission.microphone,
         Permission.location,
-        Permission.photos,
         Permission.storage,
       ].request();
     } else if (Platform.isIOS) {

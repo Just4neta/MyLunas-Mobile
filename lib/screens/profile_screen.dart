@@ -374,7 +374,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _buildCard(
               title: AppStrings.get('profile_app_info'),
               children: [
-                _buildInfoRow(Icons.info, AppStrings.get('profile_version'), '1.0.0'),
+                _buildInfoRow(Icons.info, AppStrings.get('profile_version'), '1.0.2'),
                 _buildInfoRow(Icons.code, AppStrings.get('profile_developer'), 'LUNAS-ISD'),
                 _buildInfoRow(Icons.copyright, AppStrings.get('profile_copyright'), '© MyLUNAS 2026'),
               ],
