@@ -52,26 +52,36 @@ class _SplashScreenState extends State<SplashScreen>
     _controller.forward();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _requestPermissions();
       _checkLoginStatus();
     });
   }
 
   Future<void> _requestPermissions() async {
-    if (Platform.isAndroid) {
-      await [
-        Permission.camera,
-        Permission.microphone,
-        Permission.location,
-        Permission.storage,
-      ].request();
-    } else if (Platform.isIOS) {
-      await [
-        Permission.camera,
-        Permission.microphone,
-        Permission.locationWhenInUse,
-        Permission.photos,
-      ].request();
+    try {
+      if (Platform.isAndroid) {
+        await [
+          Permission.camera,
+          Permission.microphone,
+          Permission.location,
+          Permission.storage,
+        ].request().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => {},
+        );
+      } else if (Platform.isIOS) {
+        await [
+          Permission.camera,
+          Permission.microphone,
+          Permission.locationWhenInUse,
+          Permission.photos,
+        ].request().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => {},
+        );
+      }
+    } catch (e) {
+      // Permission request failed or timed out — proceed anyway
+      debugPrint('Permission request error: $e');
     }
   }
 
@@ -171,7 +181,7 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Versi 1.0.1',
+                          'Versi 1.0.3',
                           style: TextStyle(
                             color: Colors.white.withOpacity(0.5),
                             fontSize: 12,

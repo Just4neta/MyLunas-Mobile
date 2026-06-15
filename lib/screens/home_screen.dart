@@ -134,6 +134,13 @@ class _HomeScreenState extends State<HomeScreen> {
       'autoLogin': 'true',
     },
     {
+      'title': 'MARS Mobile',
+      'image': 'assets/images/mars_mobile.png',
+      'url': 'https://apps2.mylunas.com.my/marsmobile/pages/home.php',
+      'disabled': 'false',
+      'autoLogin': 'true',
+    },
+    {
       'title': 'People Movement',
       'image': 'assets/images/people.png',
       'url': 'https://apps2.mylunas.com.my/mylunas/dashboard/',
@@ -397,7 +404,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
     final password = await SecureStorage.getPassword();
     if (email == null || password == null) return;
 
-    if (currentUrl.contains('apps2.mylunas.com.my/mars')) {
+    if (currentUrl.contains('apps2.mylunas.com.my/mars') ||
+        currentUrl.contains('apps2.mylunas.com.my/marsmobile')) {
       final marsUser = await SecureStorage.getMarsUsername();
       final marsPass = await SecureStorage.getMarsPassword();
       if (marsUser == null || marsUser.isEmpty) return;
