@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
@@ -150,7 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
     {
       'title': 'Visitor Scanner',
       'image': 'assets/images/visitor_scanner.png',
-      'url': 'https://apps2.mylunas.com.my/lunasitor/history.php',
+      'url': 'https://apps2.mylunas.com.my/lunasitor/history2.php',
       'disabled': 'false',
       'autoLogin': 'true',
     },

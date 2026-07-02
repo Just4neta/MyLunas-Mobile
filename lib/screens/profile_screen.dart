@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import '../services/secure_storage.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/locale_controller.dart';
@@ -16,7 +16,6 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   String _email = '';
   File? _profileImage;
-  final ImagePicker _picker = ImagePicker();
   final LocaleController _localeController = LocaleController();
 
   final _marsUsernameController = TextEditingController();
@@ -77,10 +76,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _pickImage() async {
-    final XFile? image = await _picker.pickImage(
-      source: ImageSource.gallery, maxWidth: 512, maxHeight: 512, imageQuality: 80,
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
     );
-    if (image != null) setState(() => _profileImage = File(image.path));
+    if (result != null && result.files.single.path != null) {
+      setState(() => _profileImage = File(result.files.single.path!));
+    }
   }
 
   Future<void> _logout() async {
@@ -374,7 +376,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _buildCard(
               title: AppStrings.get('profile_app_info'),
               children: [
-                _buildInfoRow(Icons.info, AppStrings.get('profile_version'), '1.0.2'),
+                _buildInfoRow(Icons.info, AppStrings.get('profile_version'), '1.0.0'),
                 _buildInfoRow(Icons.code, AppStrings.get('profile_developer'), 'LUNAS-ISD'),
                 _buildInfoRow(Icons.copyright, AppStrings.get('profile_copyright'), '© MyLUNAS 2026'),
               ],
