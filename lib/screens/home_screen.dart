@@ -6,6 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
+import 'package:http/http.dart' as http;
 import 'profile_screen.dart';
 import '../services/secure_storage.dart';
 import '../l10n/app_strings.dart';
@@ -18,17 +19,122 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   final LocaleController _localeController = LocaleController();
+
+  // ERT Duty Ticker
+  String _dutyText = 'Memuatkan maklumat bertugas...';
+  String _dutyTeam = '';
+  String _dutyDate = '';
+  List<Map<String, String>> _dutyMembers = [];
+  bool _showDutyOverlay = false;
+  late AnimationController _tickerController;
+  late Animation<double> _tickerAnimation;
 
   @override
   void initState() {
     super.initState();
     _localeController.addListener(() => setState(() {}));
+
+    _tickerController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 25),
+    )..repeat();
+    _tickerAnimation = Tween<double>(begin: 1.0, end: -1.0)
+        .animate(CurvedAnimation(parent: _tickerController, curve: Curves.linear));
+
+    _fetchDutyInfo();
+  }
+
+  Future<void> _fetchDutyInfo() async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://apps2.mylunas.com.my/mylunas/hse_proxy.php'),
+        headers: {'Accept': 'text/html'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final html = response.body;
+
+        String teamCode = '';
+        String date = '';
+        List<Map<String, String>> members = [];
+
+        final teamPattern = RegExp(r'team-code[^>]*>([A-Z])<', caseSensitive: false);
+        final datePattern = RegExp(r'date-line[^>]*>([^<]+)<', caseSensitive: false);
+
+        // Find current team (with "now")
+        final teamMatches = teamPattern.allMatches(html);
+        for (final match in teamMatches) {
+          final surrounding = html.substring(
+            (match.start - 200).clamp(0, html.length),
+            (match.end + 200).clamp(0, html.length),
+          );
+          if (surrounding.toLowerCase().contains('now') ||
+              surrounding.toLowerCase().contains('sekarang')) {
+            teamCode = match.group(1) ?? '';
+            break;
+          }
+        }
+
+        // Fallback
+        if (teamCode.isEmpty) {
+          final statusPattern = RegExp(
+            r'status-pill.*?team-code[^>]*>([A-Z])<',
+            caseSensitive: false, dotAll: true,
+          );
+          final m = statusPattern.firstMatch(html);
+          if (m != null) teamCode = m.group(1) ?? '';
+        }
+
+        // Get date
+        final dateMatch = datePattern.firstMatch(html);
+        if (dateMatch != null) date = dateMatch.group(1)?.trim() ?? '';
+
+        // Extract staff members from table rows
+        final rowPattern = RegExp(
+          r'<tr[^>]*>(.*?)</tr>',
+          caseSensitive: false, dotAll: true,
+        );
+        final cellPattern = RegExp(
+          r'<td[^>]*>(.*?)</td>',
+          caseSensitive: false, dotAll: true,
+        );
+        final tagPattern = RegExp(r'<[^>]+>');
+
+        for (final rowMatch in rowPattern.allMatches(html)) {
+          final cells = cellPattern.allMatches(rowMatch.group(1) ?? '').toList();
+          if (cells.length >= 2) {
+            final role = cells[0].group(1)?.replaceAll(tagPattern, '').trim() ?? '';
+            final name = cells[1].group(1)?.replaceAll(tagPattern, '').trim() ?? '';
+            if (role.isNotEmpty && name.isNotEmpty && role.length > 1) {
+              members.add({'role': role, 'name': name,
+                'dept': cells.length > 2 ? (cells[2].group(1)?.replaceAll(tagPattern, '').trim() ?? '') : ''});
+            }
+          }
+        }
+
+        setState(() {
+          _dutyTeam = teamCode;
+          _dutyDate = date;
+          _dutyMembers = members;
+          _dutyText = teamCode.isNotEmpty
+              ? '⚓  PEGAWAI ERT BERTUGAS  •  Team $teamCode  ${date.isNotEmpty ? "• $date" : ""}'
+              : '⚓  PEGAWAI ERT BERTUGAS  •  Maklumat tidak tersedia';
+        });
+      }
+    } catch (e) {
+      debugPrint('Duty fetch error: $e');
+      setState(() {
+        _dutyText = '⚓  PEGAWAI ERT BERTUGAS  •  Maklumat tidak tersedia';
+      });
+    }
   }
 
   @override
   void dispose() {
+    _tickerController.dispose();
     _localeController.removeListener(() => setState(() {}));
     super.dispose();
   }
@@ -149,7 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
     {
       'title': 'Visitor Scanner',
       'image': 'assets/images/visitor_scanner.png',
-      'url': 'https://apps2.mylunas.com.my/lunasitor/history2.php',
+      'url': 'https://apps2.mylunas.com.my/lunasitor/history.php',
       'disabled': 'false',
       'autoLogin': 'true',
     },
@@ -167,110 +273,360 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF1565C0),
       resizeToAvoidBottomInset: false,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-              child: Row(
-                children: [
-                  // Exit button
-                  GestureDetector(
-                    onTap: () {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: Text(AppStrings.get('home_exit_title')),
-                          content: Text(AppStrings.get('home_exit_content')),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: Text(AppStrings.get('home_cancel')),
+      body: Stack(
+        children: [
+          // Main content
+          SafeArea(
+            child: Column(
+              children: [
+                // Header
+                Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                  child: Row(
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: Text(AppStrings.get('home_exit_title')),
+                              content: Text(AppStrings.get('home_exit_content')),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: Text(AppStrings.get('home_cancel')),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    if (Platform.isAndroid) {
+                                      SystemNavigator.pop();
+                                    } else {
+                                      Navigator.of(context).popUntil((route) => route.isFirst);
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0D3B6E),
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: Text(AppStrings.get('home_exit_confirm')),
+                                ),
+                              ],
                             ),
-                            ElevatedButton(
-                              onPressed: () {
-                                Navigator.pop(context);
-                                if (Platform.isAndroid) {
-                                  SystemNavigator.pop();
-                                } else {
-                                  Navigator.of(context).popUntil((route) => route.isFirst);
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF0D3B6E),
-                                foregroundColor: Colors.white,
-                              ),
-                              child: Text(AppStrings.get('home_exit_confirm')),
-                            ),
-                          ],
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0D3B6E),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.exit_to_app, color: Colors.white, size: 24),
                         ),
-                      );
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Image.asset(
+                          'assets/images/Pi7_Tool_splash.png',
+                          height: 45,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.center,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      GestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const ProfileScreen()),
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0D3B6E),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.person, color: Colors.white, size: 24),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ERT Duty Ticker Bar — tap to open overlay
+                GestureDetector(
+                  onTap: () => setState(() => _showDutyOverlay = true),
+                  child: Container(
+                    height: 34,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF0D3B6E), Color(0xFF1565C0), Color(0xFF0D3B6E)],
+                      ),
+                      border: Border(
+                        bottom: BorderSide(color: Color(0xFFFFD700), width: 2.5),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          color: const Color(0xFFFFD700),
+                          child: const Text(
+                            'ERT',
+                            style: TextStyle(
+                              color: Color(0xFF0D3B6E),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: ClipRect(
+                            child: AnimatedBuilder(
+                              animation: _tickerAnimation,
+                              builder: (context, child) {
+                                return FractionalTranslation(
+                                  translation: Offset(_tickerAnimation.value, 0),
+                                  child: child,
+                                );
+                              },
+                              child: Text(
+                                '   $_dutyText   •   $_dutyText   ',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.visible,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 16),
+                              SizedBox(width: 2),
+                              Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Menu list
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: menuItems.length,
+                    itemBuilder: (context, index) {
+                      return _buildMenuCard(context, menuItems[index]);
                     },
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0D3B6E),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.exit_to_app, color: Colors.white, size: 24),
-                    ),
                   ),
-                  const SizedBox(width: 10),
-                  // Logo
-                  Expanded(
-                    child: Image.asset(
-                      'assets/images/Pi7_Tool_splash.png',
-                      height: 45,
-                      fit: BoxFit.contain,
-                      alignment: Alignment.center,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  // Profile button
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const ProfileScreen()),
-                    ),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0D3B6E),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.person, color: Colors.white, size: 24),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                ),
 
-            // Menu list
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.all(12),
-                itemCount: menuItems.length,
-                itemBuilder: (context, index) {
-                  return _buildMenuCard(context, menuItems[index]);
-                },
-              ),
+                // Footer
+                Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(10),
+                  width: double.infinity,
+                  child: Text(
+                    AppStrings.get('home_footer'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11, color: Colors.black54),
+                  ),
+                ),
+              ],
             ),
+          ),
 
-            // Footer
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.all(10),
-              width: double.infinity,
-              child: Text(
-                AppStrings.get('home_footer'),
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 11, color: Colors.black54),
+          // ERT Duty Overlay
+          if (_showDutyOverlay)
+            GestureDetector(
+              onTap: () => setState(() => _showDutyOverlay = false),
+              child: Container(
+                color: Colors.black54,
+                child: SafeArea(
+                  child: GestureDetector(
+                    onTap: () {}, // prevent dismiss when tapping panel
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Spacer to position below header + ticker
+                        const SizedBox(height: 99 + 34),
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.3),
+                                blurRadius: 20,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Panel header
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [Color(0xFF0D3B6E), Color(0xFF1565C0)],
+                                  ),
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: Radius.circular(16),
+                                    topRight: Radius.circular(16),
+                                  ),
+                                  border: Border(
+                                    bottom: BorderSide(color: Color(0xFFFFD700), width: 2.5),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.shield, color: Color(0xFFFFD700), size: 20),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'PEGAWAI ERT BERTUGAS',
+                                            style: TextStyle(
+                                              color: Color(0xFFFFD700),
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                              letterSpacing: 0.5,
+                                            ),
+                                          ),
+                                          if (_dutyTeam.isNotEmpty)
+                                            Text(
+                                              'Team $_dutyTeam  ${_dutyDate.isNotEmpty ? "• $_dutyDate" : ""}',
+                                              style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    // Close button
+                                    GestureDetector(
+                                      onTap: () => setState(() => _showDutyOverlay = false),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                        child: const Icon(Icons.close, color: Colors.white, size: 18),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // Staff list
+                              _dutyMembers.isEmpty
+                                  ? Container(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Column(
+                                        children: [
+                                          Icon(Icons.info_outline, color: Colors.grey.shade400, size: 36),
+                                          const SizedBox(height: 10),
+                                          Text(
+                                            _dutyTeam.isNotEmpty
+                                                ? 'Team $_dutyTeam sedang bertugas'
+                                                : 'Maklumat ahli pasukan tidak tersedia',
+                                            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxHeight: MediaQuery.of(context).size.height * 0.4,
+                                      ),
+                                      child: ListView.separated(
+                                        shrinkWrap: true,
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                        itemCount: _dutyMembers.length,
+                                        separatorBuilder: (_, __) => const Divider(height: 1, indent: 16, endIndent: 16),
+                                        itemBuilder: (context, i) {
+                                          final member = _dutyMembers[i];
+                                          return ListTile(
+                                            dense: true,
+                                            leading: Container(
+                                              width: 36,
+                                              height: 36,
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xFF0D3B6E),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(Icons.person, color: Colors.white, size: 18),
+                                            ),
+                                            title: Text(
+                                              member['name'] ?? '',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 13,
+                                                color: Color(0xFF0D3B6E),
+                                              ),
+                                            ),
+                                            subtitle: Text(
+                                              member['role'] ?? '',
+                                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                            ),
+                                            trailing: member['dept']?.isNotEmpty == true
+                                                ? Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(0xFFE3F2FD),
+                                                      borderRadius: BorderRadius.circular(10),
+                                                    ),
+                                                    child: Text(
+                                                      member['dept']!,
+                                                      style: const TextStyle(fontSize: 10, color: Color(0xFF1565C0)),
+                                                    ),
+                                                  )
+                                                : null,
+                                          );
+                                        },
+                                      ),
+                                    ),
+
+                              // Refresh button
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                child: TextButton.icon(
+                                  onPressed: () {
+                                    _fetchDutyInfo();
+                                    setState(() => _showDutyOverlay = false);
+                                  },
+                                  icon: const Icon(Icons.refresh, size: 14),
+                                  label: const Text('Refresh', style: TextStyle(fontSize: 12)),
+                                  style: TextButton.styleFrom(foregroundColor: const Color(0xFF1565C0)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -401,7 +757,21 @@ class _WebViewScreenState extends State<WebViewScreen> {
   Future<void> _tryAutoLogin(String currentUrl) async {
     final email = await SecureStorage.getUsername();
     final password = await SecureStorage.getPassword();
-    if (email == null || password == null) return;
+
+    debugPrint('=== AUTO-LOGIN ===');
+    debugPrint('URL: $currentUrl');
+    debugPrint('Email stored: ${email ?? "NULL"}');
+    debugPrint('Password stored: ${password != null ? "YES (${password.length} chars)" : "NULL"}');
+
+    final emailClean = email?.trim() ?? '';
+    final passwordClean = password?.trim() ?? '';
+
+    debugPrint('Email clean: "$emailClean"');
+
+    if (emailClean.isEmpty || passwordClean.isEmpty) {
+      debugPrint('AUTO-LOGIN SKIP: credentials empty after trim');
+      return;
+    }
 
     if (currentUrl.contains('apps2.mylunas.com.my/mars') ||
         currentUrl.contains('apps2.mylunas.com.my/marsmobile')) {
@@ -437,10 +807,32 @@ class _WebViewScreenState extends State<WebViewScreen> {
         var submitBtn = document.querySelector('input[name="SubmitButton"]') ||
                         document.querySelector('button[type="submit"]') ||
                         document.querySelector('input[type="submit"]');
+
+        console.log("AUTOLOGIN: emailField=" + (emailField ? emailField.name : "NOT FOUND"));
+        console.log("AUTOLOGIN: passField=" + (passField ? "FOUND" : "NOT FOUND"));
+        console.log("AUTOLOGIN: submitBtn=" + (submitBtn ? "FOUND" : "NOT FOUND"));
+        console.log("AUTOLOGIN: emailField.value=" + (emailField ? emailField.value : "N/A"));
+
+        function triggerEvent(el, eventName) {
+          var event = new Event(eventName, { bubbles: true });
+          el.dispatchEvent(event);
+        }
+
         if (emailField && passField && !emailField.value) {
-          emailField.value = "$email";
-          passField.value = "$password";
-          if (submitBtn) submitBtn.click();
+          emailField.value = "${emailClean.replaceAll('"', '\\"')}";
+          passField.value = "${passwordClean.replaceAll('"', '\\"')}";
+
+          triggerEvent(emailField, 'input');
+          triggerEvent(emailField, 'change');
+          triggerEvent(passField, 'input');
+          triggerEvent(passField, 'change');
+
+          console.log("AUTOLOGIN: values set, submitting...");
+          setTimeout(function() {
+            if (submitBtn) submitBtn.click();
+          }, 500);
+        } else {
+          console.log("AUTOLOGIN: skipped - emailField.value already=" + (emailField ? emailField.value : "N/A"));
         }
       })();
     ''');
