@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/secure_storage.dart';
 import '../l10n/app_strings.dart';
 import '../l10n/locale_controller.dart';
 import 'login_screen.dart';
+import 'barcode_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -16,6 +18,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   String _email = '';
   File? _profileImage;
+  bool _imageChanged = false;
   final LocaleController _localeController = LocaleController();
 
   final _marsUsernameController = TextEditingController();
@@ -33,7 +36,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadProfile() async {
     String? email = await SecureStorage.getUsername();
-    setState(() => _email = email ?? 'pengguna@mylunas.com.my');
+    // Load saved profile photo
+    final dir = await getApplicationDocumentsDirectory();
+    final photoFile = File('${dir.path}/profile_photo.jpg');
+    setState(() {
+      _email = email ?? 'pengguna@mylunas.com.my';
+      if (photoFile.existsSync()) _profileImage = photoFile;
+    });
   }
 
   Future<void> _loadMarsCredentials() async {
@@ -81,7 +90,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
       allowMultiple: false,
     );
     if (result != null && result.files.single.path != null) {
-      setState(() => _profileImage = File(result.files.single.path!));
+      setState(() {
+        _profileImage = File(result.files.single.path!);
+        _imageChanged = true;
+      });
+    }
+  }
+
+  Future<void> _saveProfilePhoto() async {
+    if (_profileImage == null || !_imageChanged) return;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final savedFile = await _profileImage!.copy('${dir.path}/profile_photo.jpg');
+      setState(() {
+        _profileImage = savedFile;
+        _imageChanged = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gambar profil disimpan'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal simpan gambar: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -166,10 +201,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Text(_email, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text(AppStrings.get('profile_staff'), style: const TextStyle(color: Colors.white70, fontSize: 13)),
-            TextButton.icon(
-              onPressed: _pickImage,
-              icon: const Icon(Icons.edit, color: Colors.white70, size: 14),
-              label: Text(AppStrings.get('profile_change_photo'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton.icon(
+                  onPressed: _pickImage,
+                  icon: const Icon(Icons.edit, color: Colors.white70, size: 14),
+                  label: Text(AppStrings.get('profile_change_photo'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ),
+                if (_imageChanged)
+                  ElevatedButton.icon(
+                    onPressed: _saveProfilePhoto,
+                    icon: const Icon(Icons.save, size: 14),
+                    label: const Text('Simpan', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 20),
 
@@ -180,6 +232,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _buildInfoRow(Icons.email, AppStrings.get('profile_email'), _email),
                 _buildInfoRow(Icons.business, AppStrings.get('profile_company'), AppStrings.get('profile_company_name')),
                 _buildInfoRow(Icons.phone, AppStrings.get('profile_contact'), 'admin@mylunas.com.my'),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Staff Barcode Card
+            _buildCard(
+              title: 'Kad Pekerja / Barcode',
+              children: [
+                const SizedBox(height: 4),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const BarcodeScreen()),
+                  ),
+                  icon: const Icon(Icons.badge, size: 20),
+                  label: const Text('Papar Barcode Pekerja', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0D3B6E),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Tunjukkan barcode kepada pengawal untuk imbasan masuk/keluar',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  textAlign: TextAlign.center,
+                ),
               ],
             ),
             const SizedBox(height: 16),

@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'login_screen.dart';
 import 'quote_screen.dart';
 import '../services/secure_storage.dart';
@@ -9,7 +7,7 @@ class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  _SplashScreenState createState() => _SplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen>
@@ -54,35 +52,6 @@ class _SplashScreenState extends State<SplashScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _checkLoginStatus();
     });
-  }
-
-  Future<void> _requestPermissions() async {
-    try {
-      if (Platform.isAndroid) {
-        await [
-          Permission.camera,
-          Permission.microphone,
-          Permission.location,
-          Permission.storage,
-        ].request().timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => {},
-        );
-      } else if (Platform.isIOS) {
-        await [
-          Permission.camera,
-          Permission.microphone,
-          Permission.locationWhenInUse,
-          Permission.photos,
-        ].request().timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => {},
-        );
-      }
-    } catch (e) {
-      // Permission request failed or timed out — proceed anyway
-      debugPrint('Permission request error: $e');
-    }
   }
 
   Future<void> _checkLoginStatus() async {
@@ -139,7 +108,7 @@ class _SplashScreenState extends State<SplashScreen>
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.3),
+                                color: Colors.black.withValues(alpha: 0.3),
                                 blurRadius: 20,
                                 offset: const Offset(0, 8),
                               ),
@@ -181,7 +150,7 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Versi 1.0.3',
+                          'Versi 1.0.1',
                           style: TextStyle(
                             color: Colors.white.withOpacity(0.5),
                             fontSize: 12,

@@ -60,6 +60,23 @@ class SecureStorage {
     return await _storage.read(key: _keyPassword);
   }
 
+  // MyDEX Staff No & QR Code
+  static Future<void> saveStaffNo(String staffNo) async {
+    await _storage.write(key: 'staff_no', value: staffNo);
+  }
+
+  static Future<String?> getStaffNo() async {
+    return await _storage.read(key: 'staff_no');
+  }
+
+  static Future<void> saveQrCode(String base64) async {
+    await _storage.write(key: 'qr_code', value: base64);
+  }
+
+  static Future<String?> getQrCode() async {
+    return await _storage.read(key: 'qr_code');
+  }
+
   static Future<void> clearAll() async {
     await _storage.deleteAll();
   }

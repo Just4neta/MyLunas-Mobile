@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
@@ -26,7 +27,8 @@ class _HomeScreenState extends State<HomeScreen>
   // ERT Duty Ticker
   String _dutyText = 'Memuatkan maklumat bertugas...';
   String _dutyTeam = '';
-  String _dutyDate = '';
+  String _dutyTimeSlot = '';
+  Map<String, String>? _dutyOfficer;
   List<Map<String, String>> _dutyMembers = [];
   bool _showDutyOverlay = false;
   late AnimationController _tickerController;
@@ -39,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     _tickerController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 25),
+      duration: const Duration(seconds: 30),
     )..repeat();
     _tickerAnimation = Tween<double>(begin: 1.0, end: -1.0)
         .animate(CurvedAnimation(parent: _tickerController, curve: Curves.linear));
@@ -50,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _fetchDutyInfo() async {
     try {
       final response = await http.get(
-        Uri.parse('https://apps2.mylunas.com.my/mylunas/hse_proxy.php'),
+        Uri.parse('https://apps2.mylunas.com.my/hse/emergency.php'),
         headers: {'Accept': 'text/html'},
       ).timeout(const Duration(seconds: 10));
 
@@ -58,77 +60,91 @@ class _HomeScreenState extends State<HomeScreen>
         final html = response.body;
 
         String teamCode = '';
-        String date = '';
+        String timeSlot = '';
+        Map<String, String>? officer;
         List<Map<String, String>> members = [];
 
-        final teamPattern = RegExp(r'team-code[^>]*>([A-Z])<', caseSensitive: false);
-        final datePattern = RegExp(r'date-line[^>]*>([^<]+)<', caseSensitive: false);
+        // ── Team code ── Pattern: "Team A on duty"
+        final teamOnDutyMatch = RegExp(r'Team\s+([A-Z])\s+on\s+duty', caseSensitive: false).firstMatch(html);
+        if (teamOnDutyMatch != null) teamCode = teamOnDutyMatch.group(1)?.toUpperCase() ?? '';
 
-        // Find current team (with "now")
-        final teamMatches = teamPattern.allMatches(html);
-        for (final match in teamMatches) {
-          final surrounding = html.substring(
-            (match.start - 200).clamp(0, html.length),
-            (match.end + 200).clamp(0, html.length),
-          );
-          if (surrounding.toLowerCase().contains('now') ||
-              surrounding.toLowerCase().contains('sekarang')) {
-            teamCode = match.group(1) ?? '';
-            break;
+        // ── Time slot ── Pattern: "0800 - 1600"
+        final timeMatch = RegExp(r'(\d{4})\s*[-–]\s*(\d{4})').firstMatch(html);
+        if (timeMatch != null) timeSlot = '${timeMatch.group(1)}-${timeMatch.group(2)}';
+
+        // ── Officer name ── Pattern: "Team A on duty — NAME (time)"
+        String officerName = '';
+        final officerLineMatch = RegExp(
+          r'Team\s+[A-Z]\s+on\s+duty\s*[—\-–]\s*([^\(\n]+)\s*\(',
+          caseSensitive: false,
+        ).firstMatch(html);
+        if (officerLineMatch != null) officerName = officerLineMatch.group(1)?.trim() ?? '';
+
+        // ── Phone & Email
+        final phoneMatch = RegExp(r'tel:([0-9\-\s+]+)').firstMatch(html);
+        final emailInBracket = RegExp(r'<([a-zA-Z0-9._%+\-]+@[^>]+)>').firstMatch(html);
+        final emailHref = RegExp(r'mailto:([^"\)]+)').firstMatch(html);
+        final phone = phoneMatch?.group(1)?.trim() ?? '';
+        final email = emailInBracket?.group(1)?.trim() ?? emailHref?.group(1)?.trim() ?? '';
+
+        // ── Role ── text between officer name and "Staff No"
+        String role = '';
+        if (officerName.isNotEmpty) {
+          final roleMatch = RegExp(
+            r'ON\s+DUTY[\s\S]{1,200}' + RegExp.escape(officerName) + r'[\s\S]{1,50}\n([^\n]{3,40})\n',
+            caseSensitive: false,
+          ).firstMatch(html);
+          role = roleMatch?.group(1)?.trim() ?? '';
+        }
+        if (role.isEmpty) {
+          for (final r in ['Technician', 'Engineer', 'Officer', 'Pegawai', 'Jurutera', 'Supervisor']) {
+            if (html.contains(r)) { role = r; break; }
           }
         }
 
-        // Fallback
-        if (teamCode.isEmpty) {
-          final statusPattern = RegExp(
-            r'status-pill.*?team-code[^>]*>([A-Z])<',
-            caseSensitive: false, dotAll: true,
-          );
-          final m = statusPattern.firstMatch(html);
-          if (m != null) teamCode = m.group(1) ?? '';
+        // ── Staff No ── "Staff No: 5348"
+        final staffMatch = RegExp(r'Staff No[:\s]+(\d{3,6})').firstMatch(html);
+        final staffNo = staffMatch?.group(1)?.trim() ?? '';
+
+        if (officerName.isNotEmpty || phone.isNotEmpty) {
+          officer = {
+            'name': officerName.isNotEmpty ? officerName : 'Pegawai ERT',
+            'role': role,
+            'staffNo': staffNo,
+            'phone': phone,
+            'email': email,
+          };
         }
 
-        // Get date
-        final dateMatch = datePattern.firstMatch(html);
-        if (dateMatch != null) date = dateMatch.group(1)?.trim() ?? '';
-
-        // Extract staff members from table rows
-        final rowPattern = RegExp(
-          r'<tr[^>]*>(.*?)</tr>',
-          caseSensitive: false, dotAll: true,
-        );
-        final cellPattern = RegExp(
-          r'<td[^>]*>(.*?)</td>',
-          caseSensitive: false, dotAll: true,
-        );
-        final tagPattern = RegExp(r'<[^>]+>');
-
-        for (final rowMatch in rowPattern.allMatches(html)) {
-          final cells = cellPattern.allMatches(rowMatch.group(1) ?? '').toList();
-          if (cells.length >= 2) {
-            final role = cells[0].group(1)?.replaceAll(tagPattern, '').trim() ?? '';
-            final name = cells[1].group(1)?.replaceAll(tagPattern, '').trim() ?? '';
-            if (role.isNotEmpty && name.isNotEmpty && role.length > 1) {
-              members.add({'role': role, 'name': name,
-                'dept': cells.length > 2 ? (cells[2].group(1)?.replaceAll(tagPattern, '').trim() ?? '') : ''});
-            }
-          }
+        // ── Team members ── "- Name Staff No: XXXX"
+        final memberPattern = RegExp(r'-\s+([A-Z][^\n]+?)\s+Staff No[:\s]+(\d{3,6})', caseSensitive: false);
+        for (final m in memberPattern.allMatches(html)) {
+          final name = m.group(1)?.trim() ?? '';
+          final sNo = m.group(2)?.trim() ?? '';
+          if (name.isNotEmpty && sNo.isNotEmpty) members.add({'staffNo': sNo, 'name': name});
         }
+
+        // ── Ticker text
+        final tickerText = (teamCode.isNotEmpty || officer != null)
+            ? '${teamCode.isNotEmpty ? "Team $teamCode on duty" : "ERT Bertugas"}'
+              '${officer != null ? " — ${officer['name']}" : ""}'
+              '${officer?['role']?.isNotEmpty == true ? " · ${officer!['role']}" : ""}'
+              '${officer?['staffNo']?.isNotEmpty == true ? " · Staff No: ${officer!['staffNo']}" : ""}'
+              '${officer?['phone']?.isNotEmpty == true ? " · 📞 ${officer!['phone']}" : ""}'
+              '${officer?['email']?.isNotEmpty == true ? " · ✉️ ${officer!['email']}" : ""}'
+              '${timeSlot.isNotEmpty ? " ($timeSlot)" : ""}'
+            : 'Memuatkan maklumat bertugas...';
 
         setState(() {
+          _dutyText = tickerText;
           _dutyTeam = teamCode;
-          _dutyDate = date;
+          _dutyTimeSlot = timeSlot;
+          _dutyOfficer = officer;
           _dutyMembers = members;
-          _dutyText = teamCode.isNotEmpty
-              ? '⚓  PEGAWAI ERT BERTUGAS  •  Team $teamCode  ${date.isNotEmpty ? "• $date" : ""}'
-              : '⚓  PEGAWAI ERT BERTUGAS  •  Maklumat tidak tersedia';
         });
       }
     } catch (e) {
       debugPrint('Duty fetch error: $e');
-      setState(() {
-        _dutyText = '⚓  PEGAWAI ERT BERTUGAS  •  Maklumat tidak tersedia';
-      });
     }
   }
 
@@ -258,6 +274,13 @@ class _HomeScreenState extends State<HomeScreen>
       'url': 'https://apps2.mylunas.com.my/lunasitor/history.php',
       'disabled': 'false',
       'autoLogin': 'true',
+    },
+    {
+      'title': 'ERT Alert',
+      'image': 'assets/images/Ert_alert.png',
+      'url': 'https://apps2.mylunas.com.my/hse/emergency.php',
+      'disabled': 'false',
+      'autoLogin': 'false',
     },
     {
       'title': 'Risk Management',
@@ -445,7 +468,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
 
-          // ERT Duty Overlay
+          // ERT Duty Overlay — matches emergency.php design
           if (_showDutyOverlay)
             GestureDetector(
               onTap: () => setState(() => _showDutyOverlay = false),
@@ -453,171 +476,238 @@ class _HomeScreenState extends State<HomeScreen>
                 color: Colors.black54,
                 child: SafeArea(
                   child: GestureDetector(
-                    onTap: () {}, // prevent dismiss when tapping panel
+                    onTap: () {},
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Spacer to position below header + ticker
                         const SizedBox(height: 99 + 34),
-                        Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.3),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Panel header
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [Color(0xFF0D3B6E), Color(0xFF1565C0)],
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            child: Column(
+                              children: [
+                                // Panel container
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0F2744),
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 24, offset: const Offset(0,8))],
                                   ),
-                                  borderRadius: BorderRadius.only(
-                                    topLeft: Radius.circular(16),
-                                    topRight: Radius.circular(16),
-                                  ),
-                                  border: Border(
-                                    bottom: BorderSide(color: Color(0xFFFFD700), width: 2.5),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.shield, color: Color(0xFFFFD700), size: 20),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          const Text(
-                                            'PEGAWAI ERT BERTUGAS',
-                                            style: TextStyle(
-                                              color: Color(0xFFFFD700),
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
-                                              letterSpacing: 0.5,
-                                            ),
-                                          ),
-                                          if (_dutyTeam.isNotEmpty)
-                                            Text(
-                                              'Team $_dutyTeam  ${_dutyDate.isNotEmpty ? "• $_dutyDate" : ""}',
-                                              style: const TextStyle(
-                                                color: Colors.white70,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                    // Close button
-                                    GestureDetector(
-                                      onTap: () => setState(() => _showDutyOverlay = false),
-                                      child: Container(
-                                        padding: const EdgeInsets.all(6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.15),
-                                          borderRadius: BorderRadius.circular(20),
+                                  child: Column(
+                                    children: [
+                                      // Header
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                        decoration: const BoxDecoration(
+                                          gradient: LinearGradient(colors: [Color(0xFF0A1F3D), Color(0xFF142D5C)]),
+                                          borderRadius: BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+                                          border: Border(bottom: BorderSide(color: Color(0xFFFFD700), width: 2.5)),
                                         ),
-                                        child: const Icon(Icons.close, color: Colors.white, size: 18),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                              // Staff list
-                              _dutyMembers.isEmpty
-                                  ? Container(
-                                      padding: const EdgeInsets.all(24),
-                                      child: Column(
-                                        children: [
-                                          Icon(Icons.info_outline, color: Colors.grey.shade400, size: 36),
-                                          const SizedBox(height: 10),
-                                          Text(
-                                            _dutyTeam.isNotEmpty
-                                                ? 'Team $_dutyTeam sedang bertugas'
-                                                : 'Maklumat ahli pasukan tidak tersedia',
-                                            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        ],
-                                      ),
-                                    )
-                                  : ConstrainedBox(
-                                      constraints: BoxConstraints(
-                                        maxHeight: MediaQuery.of(context).size.height * 0.4,
-                                      ),
-                                      child: ListView.separated(
-                                        shrinkWrap: true,
-                                        padding: const EdgeInsets.symmetric(vertical: 8),
-                                        itemCount: _dutyMembers.length,
-                                        separatorBuilder: (_, __) => const Divider(height: 1, indent: 16, endIndent: 16),
-                                        itemBuilder: (context, i) {
-                                          final member = _dutyMembers[i];
-                                          return ListTile(
-                                            dense: true,
-                                            leading: Container(
-                                              width: 36,
-                                              height: 36,
-                                              decoration: const BoxDecoration(
-                                                color: Color(0xFF0D3B6E),
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: const Icon(Icons.person, color: Colors.white, size: 18),
-                                            ),
-                                            title: Text(
-                                              member['name'] ?? '',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 13,
-                                                color: Color(0xFF0D3B6E),
+                                        child: Row(
+                                          children: [
+                                            const Text('⚓', style: TextStyle(fontSize: 20)),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  const Text('PEGAWAI ERT BERTUGAS',
+                                                      style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.5)),
+                                                  if (_dutyTeam.isNotEmpty)
+                                                    Text('Team $_dutyTeam${_dutyTimeSlot.isNotEmpty ? " · $_dutyTimeSlot" : ""}',
+                                                        style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                                                ],
                                               ),
                                             ),
-                                            subtitle: Text(
-                                              member['role'] ?? '',
-                                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                            GestureDetector(
+                                              onTap: () => setState(() => _showDutyOverlay = false),
+                                              child: Container(
+                                                width: 32, height: 32,
+                                                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), shape: BoxShape.circle, border: Border.all(color: Colors.white30)),
+                                                child: const Icon(Icons.close, color: Colors.white, size: 16),
+                                              ),
                                             ),
-                                            trailing: member['dept']?.isNotEmpty == true
-                                                ? Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                                    decoration: BoxDecoration(
-                                                      color: const Color(0xFFE3F2FD),
-                                                      borderRadius: BorderRadius.circular(10),
-                                                    ),
-                                                    child: Text(
-                                                      member['dept']!,
-                                                      style: const TextStyle(fontSize: 10, color: Color(0xFF1565C0)),
-                                                    ),
-                                                  )
-                                                : null,
-                                          );
-                                        },
+                                          ],
+                                        ),
                                       ),
-                                    ),
 
-                              // Refresh button
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                child: TextButton.icon(
-                                  onPressed: () {
-                                    _fetchDutyInfo();
-                                    setState(() => _showDutyOverlay = false);
-                                  },
-                                  icon: const Icon(Icons.refresh, size: 14),
-                                  label: const Text('Refresh', style: TextStyle(fontSize: 12)),
-                                  style: TextButton.styleFrom(foregroundColor: const Color(0xFF1565C0)),
+                                      // Body
+                                      Padding(
+                                        padding: const EdgeInsets.all(14),
+                                        child: Column(
+                                          children: [
+                                            // Purple team card
+                                            Container(
+                                              width: double.infinity,
+                                              padding: const EdgeInsets.all(22),
+                                              margin: const EdgeInsets.only(bottom: 12),
+                                              decoration: BoxDecoration(
+                                                gradient: const LinearGradient(colors: [Color(0xFF6D28D9), Color(0xFF4C1D95)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                                                borderRadius: BorderRadius.circular(14),
+                                              ),
+                                              child: Column(
+                                                children: [
+                                                  const Text('CURRENTLY ON DUTY', style: TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 2)),
+                                                  const SizedBox(height: 8),
+                                                  Text('Team ${_dutyTeam.isNotEmpty ? _dutyTeam : "?"}', style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900)),
+                                                  if (_dutyTimeSlot.isNotEmpty)
+                                                    Text(_dutyTimeSlot, style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                                                ],
+                                              ),
+                                            ),
+
+                                            // Officer card
+                                            if (_dutyOfficer != null)
+                                              Container(
+                                                width: double.infinity,
+                                                padding: const EdgeInsets.all(14),
+                                                margin: const EdgeInsets.only(bottom: 12),
+                                                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Container(
+                                                          width: 36, height: 36,
+                                                          decoration: const BoxDecoration(color: Color(0xFFFEE2E2), shape: BoxShape.circle),
+                                                          child: const Center(child: Text('📞', style: TextStyle(fontSize: 16))),
+                                                        ),
+                                                        const SizedBox(width: 10),
+                                                        const Text('Pegawai ERT Bertugas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B))),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 12),
+                                                    Container(
+                                                      width: double.infinity,
+                                                      padding: const EdgeInsets.all(12),
+                                                      decoration: BoxDecoration(color: const Color(0xFFFFF8F8), border: Border.all(color: const Color(0xFFFECACA)), borderRadius: BorderRadius.circular(10)),
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Container(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                                                            decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(20)),
+                                                            child: const Text('ON DUTY', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                                          ),
+                                                          const SizedBox(height: 8),
+                                                          Text(_dutyOfficer!['name'] ?? '', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E293B))),
+                                                          if ((_dutyOfficer!['role'] ?? '').isNotEmpty)
+                                                            Text(_dutyOfficer!['role']!, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                                                          if ((_dutyOfficer!['staffNo'] ?? '').isNotEmpty)
+                                                            Text('Staff No: ${_dutyOfficer!['staffNo']}', style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                                                          const SizedBox(height: 12),
+                                                          Wrap(
+                                                            spacing: 8,
+                                                            runSpacing: 8,
+                                                            children: [
+                                                              if ((_dutyOfficer!['phone'] ?? '').isNotEmpty)
+                                                                GestureDetector(
+                                                                  onTap: () => launchUrl(Uri.parse('tel:${_dutyOfficer!['phone']}')),
+                                                                  child: Container(
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                                                    decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(20)),
+                                                                    child: Text('📞 ${_dutyOfficer!['phone']}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                                                                  ),
+                                                                ),
+                                                              if ((_dutyOfficer!['email'] ?? '').isNotEmpty)
+                                                                GestureDetector(
+                                                                  onTap: () => launchUrl(Uri.parse('mailto:${_dutyOfficer!['email']}')),
+                                                                  child: Container(
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                                                    decoration: BoxDecoration(color: const Color(0xFF1D4ED8), borderRadius: BorderRadius.circular(20)),
+                                                                    child: Row(
+                                                                      mainAxisSize: MainAxisSize.min,
+                                                                      children: [
+                                                                        const Text('✉️ ', style: TextStyle(fontSize: 11)),
+                                                                        Flexible(
+                                                                          child: Text(
+                                                                            _dutyOfficer!['email']!,
+                                                                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                                                                            overflow: TextOverflow.ellipsis,
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                            ],
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+
+                                            // Team members
+                                            if (_dutyMembers.isNotEmpty)
+                                              Container(
+                                                width: double.infinity,
+                                                padding: const EdgeInsets.all(14),
+                                                margin: const EdgeInsets.only(bottom: 12),
+                                                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Container(
+                                                          width: 32, height: 32,
+                                                          decoration: const BoxDecoration(color: Color(0xFFF0F9FF), shape: BoxShape.circle),
+                                                          child: const Center(child: Text('👥', style: TextStyle(fontSize: 14))),
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Text('Team $_dutyTeam — On-Duty Members', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1E293B))),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 10),
+                                                    ..._dutyMembers.map((m) {
+                                                      final initials = (m['name'] ?? '').split(' ').take(2).map((w) => w.isNotEmpty ? w[0] : '').join().toUpperCase();
+                                                      return Container(
+                                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                                        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9)))),
+                                                        child: Row(
+                                                          children: [
+                                                            Container(
+                                                              width: 36, height: 36,
+                                                              decoration: const BoxDecoration(color: Color(0xFF0D3B6E), shape: BoxShape.circle),
+                                                              child: Center(child: Text(initials, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold))),
+                                                            ),
+                                                            const SizedBox(width: 10),
+                                                            Expanded(
+                                                              child: Column(
+                                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                                children: [
+                                                                  Text(m['name'] ?? '', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1E293B))),
+                                                                  Text('Staff No: ${m['staffNo'] ?? ''}', style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      );
+                                                    }),
+                                                  ],
+                                                ),
+                                              ),
+
+                                            // Refresh button
+                                            TextButton.icon(
+                                              onPressed: () {
+                                                _fetchDutyInfo();
+                                                setState(() => _showDutyOverlay = false);
+                                              },
+                                              icon: const Icon(Icons.refresh, size: 14, color: Colors.white70),
+                                              label: const Text('Refresh', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -840,17 +930,18 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        // Check if WebView can go back — navigate within WebView first
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
         if (_webViewController != null) {
           bool canGoBack = await _webViewController!.canGoBack();
           if (canGoBack) {
             await _webViewController!.goBack();
-            return false; // Don't pop the screen
+            return;
           }
         }
-        return true; // Pop the screen if no more history
+        if (context.mounted) Navigator.of(context).pop();
       },
       child: Scaffold(
         appBar: AppBar(
@@ -947,6 +1038,40 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 setState(() => _isLoading = false);
                 if (widget.autoLogin && url != null) {
                   await _tryAutoLogin(url.toString());
+                }
+
+                // Extract MyDEX QR code and staff number
+                if (_currentUrl.contains('mydex')) {
+                  await Future.delayed(const Duration(seconds: 2));
+                  final result = await controller.evaluateJavascript(source: '''
+                    (function() {
+                      var qrDiv = document.getElementById("qrcode");
+                      if (qrDiv) {
+                        var staffNo = qrDiv.getAttribute("title") || "";
+                        var img = qrDiv.querySelector("img[src]");
+                        var base64 = img ? img.src : "";
+                        if (base64 && base64.startsWith("data:image")) {
+                          return JSON.stringify({ staffNo: staffNo, base64: base64 });
+                        }
+                        if (staffNo) return JSON.stringify({ staffNo: staffNo, base64: "" });
+                      }
+                      return null;
+                    })();
+                  ''');
+                  if (result != null && result.toString() != 'null') {
+                    try {
+                      final raw = result.toString();
+                      final str = raw.startsWith('"') ? raw.substring(1, raw.length - 1).replaceAll(r'\"', '"') : raw;
+                      final data = jsonDecode(str) as Map<String, dynamic>;
+                      final staffNo = data['staffNo']?.toString() ?? '';
+                      final base64 = data['base64']?.toString() ?? '';
+                      if (staffNo.isNotEmpty) await SecureStorage.saveStaffNo(staffNo);
+                      if (base64.isNotEmpty) await SecureStorage.saveQrCode(base64);
+                      debugPrint('MyDEX QR saved — staffNo: $staffNo, hasImage: ${base64.isNotEmpty}');
+                    } catch (e) {
+                      debugPrint('QR extract error: $e');
+                    }
+                  }
                 }
 
                 // Detect blank/white page and redirect to dashboard
@@ -1065,20 +1190,5 @@ class _WebViewScreenState extends State<WebViewScreen> {
         ),
       ),
     );
-  }
-
-  Future<void> _openPdf(String url) async {
-    try {
-      // Open PDF URL in external browser/viewer
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        // Fallback — load in WebView
-        await _webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
-      }
-    } catch (e) {
-      debugPrint('PDF open error: $e');
-    }
   }
 }
