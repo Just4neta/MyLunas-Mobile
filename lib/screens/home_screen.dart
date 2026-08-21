@@ -159,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen>
     {
       'title': 'MyDEX',
       'image': 'assets/images/Pi7_Tool_icon.png',
-      'url': 'https://apps2.mylunas.com.my/mydex/dist/login.php',
+      'url': 'https://apps2.mylunas.com.my/mydex/dist/index.php',
       'disabled': 'false',
       'autoLogin': 'true',
     },
@@ -173,9 +173,10 @@ class _HomeScreenState extends State<HomeScreen>
     {
       'title': 'MyLunas SharePoint',
       'image': 'assets/images/logoMock_compass.png',
-      'url': 'https://mylunas.sharepoint.com/',
+      'url': 'https://mylunas.sharepoint.com/operations/Lumut/BNS/SitePages/BNS.aspx',
       'disabled': 'false',
-      'autoLogin': 'true',
+      'autoLogin': 'false',
+      'external': 'true',
     },
     {
       'title': 'MARS Approval',
@@ -222,16 +223,18 @@ class _HomeScreenState extends State<HomeScreen>
     {
       'title': 'TOMMS EAM Solution',
       'image': 'assets/images/logoMock_tomms1.png',
-      'url': 'https://tomms.net.my/lunas_prod/multi_browser_index.htm',
+      'url': 'https://tomms.my/software/lunas.html',
       'disabled': 'false',
-      'autoLogin': 'true',
+      'autoLogin': 'false',
+      'external': 'true',
     },
     {
       'title': 'TOMMS Web Request',
       'image': 'assets/images/logoMock_tomms2.png',
-      'url': 'https://tomms.net.my/LUNAS_Portal_prod/multi_browser_index.htm',
+      'url': 'https://tomms.my/software/lunas_web.html',
       'disabled': 'false',
-      'autoLogin': 'true',
+      'autoLogin': 'false',
+      'external': 'true',
     },
     {
       'title': 'DASS-21 Test',
@@ -723,6 +726,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildMenuCard(BuildContext context, Map<String, String> item) {
     bool isDisabled = item['disabled'] == 'true';
+    bool isExternal = item['external'] == 'true';
 
     return GestureDetector(
       onTap: isDisabled
@@ -733,18 +737,28 @@ class _HomeScreenState extends State<HomeScreen>
                 behavior: SnackBarBehavior.floating,
               ));
             }
-          : () {
-              bool autoLogin = item['autoLogin'] == 'true';
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => WebViewScreen(
-                    title: item['title']!,
-                    url: item['url']!,
-                    autoLogin: autoLogin,
-                  ),
-                ),
-              );
+          : () async {
+              if (isExternal) {
+                // Open in external browser (Microsoft/SharePoint requires this)
+                final uri = Uri.parse(item['url']!);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              } else {
+                bool autoLogin = item['autoLogin'] == 'true';
+                if (context.mounted) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => WebViewScreen(
+                        title: item['title']!,
+                        url: item['url']!,
+                        autoLogin: autoLogin,
+                      ),
+                    ),
+                  );
+                }
+              }
             },
       child: Opacity(
         opacity: isDisabled ? 0.5 : 1.0,

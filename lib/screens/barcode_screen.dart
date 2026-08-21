@@ -1,10 +1,8 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../services/secure_storage.dart';
-import '../l10n/app_strings.dart';
 
 class BarcodeScreen extends StatefulWidget {
   const BarcodeScreen({super.key});
