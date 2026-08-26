@@ -836,6 +836,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
   InAppWebViewController? _webViewController;
   bool _isLoading = true;
   String _currentUrl = '';
+  int _autoLoginAttempts = 0;
+  static const int _maxAutoLoginAttempts = 3;
+  bool _autoLoginStopped = false;
 
   final InAppWebViewSettings _settings = InAppWebViewSettings(
     javaScriptEnabled: true,
@@ -858,22 +861,150 @@ class _WebViewScreenState extends State<WebViewScreen> {
     userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   );
 
+  void _showUpdatePasswordDialog() {
+    final passwordController = TextEditingController();
+    bool obscure = true;
+    bool isLoading = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Column(
+            children: [
+              Container(
+                width: 56, height: 56,
+                decoration: const BoxDecoration(color: Color(0xFFFFF3E0), shape: BoxShape.circle),
+                child: const Icon(Icons.lock_reset, color: Color(0xFFE65100), size: 30),
+              ),
+              const SizedBox(height: 12),
+              const Text('Kemaskini Kata Laluan',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0D3B6E)),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(10)),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Color(0xFFE65100), size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Log masuk gagal 3 kali. Kata laluan mungkin telah bertukar. Masukkan kata laluan terkini anda.',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF5D4037)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                obscureText: obscure,
+                decoration: InputDecoration(
+                  labelText: 'Kata Laluan Baru',
+                  hintText: 'Masukkan kata laluan terkini',
+                  prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF0D3B6E)),
+                  suffixIcon: IconButton(
+                    icon: Icon(obscure ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                    onPressed: () => setDialogState(() => obscure = !obscure),
+                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFF0D3B6E), width: 2),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Batal', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: isLoading ? null : () async {
+                final newPass = passwordController.text.trim();
+                if (newPass.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Sila masukkan kata laluan'), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+                  );
+                  return;
+                }
+                setDialogState(() => isLoading = true);
+
+                // Save new password
+                await SecureStorage.savePassword(newPass);
+
+                // Reset counter and retry
+                _autoLoginAttempts = 0;
+                _autoLoginStopped = false;
+
+                if (ctx.mounted) Navigator.pop(ctx);
+
+                // Retry auto-login with new password
+                await Future.delayed(const Duration(milliseconds: 500));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Kata laluan dikemaskini. Cuba log masuk semula...'),
+                      backgroundColor: Colors.green,
+                      duration: Duration(seconds: 3),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  await _tryAutoLogin(_currentUrl);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0D3B6E),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: isLoading
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Kemaskini & Cuba Semula'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _tryAutoLogin(String currentUrl) async {
+    // Stop auto-login if max attempts reached
+    if (_autoLoginStopped) return;
+    if (_autoLoginAttempts >= _maxAutoLoginAttempts) {
+      if (!_autoLoginStopped) {
+        _autoLoginStopped = true;
+        debugPrint('AUTO-LOGIN STOPPED: max $_maxAutoLoginAttempts attempts reached');
+        if (mounted) {
+          _showUpdatePasswordDialog();
+        }
+      }
+      return;
+    }
+
     final email = await SecureStorage.getUsername();
     final password = await SecureStorage.getPassword();
 
-    debugPrint('=== AUTO-LOGIN ===');
+    debugPrint('=== AUTO-LOGIN attempt ${_autoLoginAttempts + 1}/$_maxAutoLoginAttempts ===');
     debugPrint('URL: $currentUrl');
-    debugPrint('Email stored: ${email ?? "NULL"}');
-    debugPrint('Password stored: ${password != null ? "YES (${password.length} chars)" : "NULL"}');
 
     final emailClean = email?.trim() ?? '';
     final passwordClean = password?.trim() ?? '';
 
-    debugPrint('Email clean: "$emailClean"');
-
     if (emailClean.isEmpty || passwordClean.isEmpty) {
-      debugPrint('AUTO-LOGIN SKIP: credentials empty after trim');
+      debugPrint('AUTO-LOGIN SKIP: credentials empty');
       return;
     }
 
@@ -882,6 +1013,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
       final marsUser = await SecureStorage.getMarsUsername();
       final marsPass = await SecureStorage.getMarsPassword();
       if (marsUser == null || marsUser.isEmpty) return;
+      _autoLoginAttempts++;
       await _webViewController?.evaluateJavascript(source: '''
         (function() {
           var userField = document.querySelector('input[name="username"]') ||
@@ -901,6 +1033,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
       return;
     }
 
+    _autoLoginAttempts++;
+    debugPrint('AUTO-LOGIN attempt $_autoLoginAttempts');
+
     await _webViewController?.evaluateJavascript(source: '''
       (function() {
         var emailField = document.querySelector('input[name="email"]') ||
@@ -912,11 +1047,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
                         document.querySelector('button[type="submit"]') ||
                         document.querySelector('input[type="submit"]');
 
-        console.log("AUTOLOGIN: emailField=" + (emailField ? emailField.name : "NOT FOUND"));
-        console.log("AUTOLOGIN: passField=" + (passField ? "FOUND" : "NOT FOUND"));
-        console.log("AUTOLOGIN: submitBtn=" + (submitBtn ? "FOUND" : "NOT FOUND"));
-        console.log("AUTOLOGIN: emailField.value=" + (emailField ? emailField.value : "N/A"));
-
         function triggerEvent(el, eventName) {
           var event = new Event(eventName, { bubbles: true });
           el.dispatchEvent(event);
@@ -925,18 +1055,13 @@ class _WebViewScreenState extends State<WebViewScreen> {
         if (emailField && passField && !emailField.value) {
           emailField.value = "${emailClean.replaceAll('"', '\\"')}";
           passField.value = "${passwordClean.replaceAll('"', '\\"')}";
-
           triggerEvent(emailField, 'input');
           triggerEvent(emailField, 'change');
           triggerEvent(passField, 'input');
           triggerEvent(passField, 'change');
-
-          console.log("AUTOLOGIN: values set, submitting...");
           setTimeout(function() {
             if (submitBtn) submitBtn.click();
           }, 500);
-        } else {
-          console.log("AUTOLOGIN: skipped - emailField.value already=" + (emailField ? emailField.value : "N/A"));
         }
       })();
     ''');
