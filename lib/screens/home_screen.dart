@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
@@ -231,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen>
     {
       'title': 'TOMMS Web Request',
       'image': 'assets/images/logoMock_tomms2.png',
-      'url': 'https://tomms.my/software/lunas_web.html',
+      'url': 'https://tomms.biz/lunas_web',
       'disabled': 'false',
       'autoLogin': 'false',
       'external': 'true',
@@ -1035,6 +1034,47 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
     _autoLoginAttempts++;
     debugPrint('AUTO-LOGIN attempt $_autoLoginAttempts');
+
+    // Only count as attempt if page shows login error OR credentials were submitted
+    final pageCheck = await _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var hasPasswordField = !!document.querySelector('input[name="password"], input[type="password"]');
+        var hasError = document.body.innerText.toLowerCase().includes("denied") ||
+                       document.body.innerText.toLowerCase().includes("wrong") ||
+                       document.body.innerText.toLowerCase().includes("invalid") ||
+                       document.body.innerText.toLowerCase().includes("incorrect") ||
+                       document.body.innerText.toLowerCase().includes("gagal") ||
+                       document.body.innerText.toLowerCase().includes("salah");
+        return JSON.stringify({ hasPasswordField: hasPasswordField, hasError: hasError });
+      })();
+    ''');
+
+    bool isLoginPage = false;
+    bool hasLoginError = false;
+    if (pageCheck != null && pageCheck != 'null') {
+      try {
+        final raw = pageCheck.toString().replaceAll(r'\"', '"');
+        final str = raw.startsWith('"') ? raw.substring(1, raw.length - 1) : raw;
+        final data = jsonDecode(str) as Map<String, dynamic>;
+        isLoginPage = data['hasPasswordField'] == true;
+        hasLoginError = data['hasError'] == true;
+      } catch (_) {}
+    }
+
+    if (!isLoginPage) {
+      // Not a login page — login was successful, reset counter
+      _autoLoginAttempts = 0;
+      debugPrint('AUTO-LOGIN: not login page, reset counter');
+      return;
+    }
+
+    if (hasLoginError) {
+      // Login failed — this counts as a real attempt
+      debugPrint('AUTO-LOGIN: login error detected, attempt $_autoLoginAttempts');
+    } else {
+      // Login form found but no error yet — submitting credentials
+      debugPrint('AUTO-LOGIN: submitting credentials, attempt $_autoLoginAttempts');
+    }
 
     await _webViewController?.evaluateJavascript(source: '''
       (function() {
