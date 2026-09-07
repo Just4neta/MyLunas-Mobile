@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
 import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
 import 'profile_screen.dart';
 import '../services/secure_storage.dart';
 import '../l10n/app_strings.dart';
@@ -845,13 +846,61 @@ class _WebViewScreenState extends State<WebViewScreen> {
   int _retryCount = 0;
   static const int _maxRetry = 3;
 
+  // Systems that need location permission pre-granted
+  static const List<String> _locationRequiredUrls = [
+    'scanDepartment_device',
+    'scanDepartment',
+    'tmscannew',
+    'geofence',
+    'location',
+    'attendance',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _requestRequiredPermissions();
+  }
+
+  Future<void> _requestRequiredPermissions() async {
+    // Always request camera
+    await Permission.camera.request();
+
+    // Request location if this system needs it
+    final needsLocation = _locationRequiredUrls.any(
+      (s) => widget.url.toLowerCase().contains(s.toLowerCase())
+    );
+
+    if (needsLocation || widget.url.contains('mydex')) {
+      final status = await Permission.location.status;
+      if (!status.isGranted) {
+        final result = await Permission.location.request();
+        if (!result.isGranted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Akses lokasi diperlukan untuk pengimbas ini. Sila benarkan dalam Tetapan.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 5),
+              behavior: SnackBarBehavior.floating,
+              action: SnackBarAction(
+                label: 'Tetapan',
+                textColor: Colors.white,
+                onPressed: openAppSettings,
+              ),
+            ),
+          );
+        }
+      }
+    }
+  }
+
   final InAppWebViewSettings _settings = InAppWebViewSettings(
     javaScriptEnabled: true,
     mediaPlaybackRequiresUserGesture: false,
     allowsInlineMediaPlayback: true,
     useHybridComposition: true,
-    javaScriptCanOpenWindowsAutomatically: true,
-    supportMultipleWindows: true,
+    javaScriptCanOpenWindowsAutomatically: false, // Prevent iOS WKWebView popup crash
+    supportMultipleWindows: false,
     allowsBackForwardNavigationGestures: true,
     supportZoom: true,
     builtInZoomControls: false,
@@ -861,6 +910,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
     domStorageEnabled: true,
     databaseEnabled: true,
     saveFormData: true,
+    geolocationEnabled: true,
     useOnDownloadStart: true,
     allowFileAccessFromFileURLs: true,
     allowUniversalAccessFromFileURLs: true,
@@ -1318,8 +1368,18 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 if (url != null) _currentUrl = url.toString();
                 setState(() => _isLoading = true);
 
+                // Inject window.open override EARLY — before page JS runs
+                // Critical for iOS WKWebView to prevent crash
+                controller.evaluateJavascript(source: '''
+                  window.open = function(url, target, features) {
+                    if (url && url !== "" && url !== "about:blank") {
+                      setTimeout(function() { window.location.href = url; }, 10);
+                    }
+                    return { closed: false, close: function(){}, focus: function(){}, document: document };
+                  };
+                ''');
+
                 // Reset auto-login when navigating to login page
-                // (handles back button navigation to login page)
                 final urlStr = url?.toString().toLowerCase() ?? '';
                 if (urlStr.contains('login') && !_autoLoginStopped) {
                   _autoLoginAttempts = 0;
@@ -1528,14 +1588,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 );
               },
               onCreateWindow: (controller, createWindowAction) async {
-                // iOS: MUST return true to tell WKWebView we handled the window
-                // If return false, iOS terminates the WebView session
+                // iOS: Return false — let our JS window.open override handle navigation
+                // Returning true without creating actual WKWebView crashes iOS
                 final url = createWindowAction.request.url;
                 if (url != null && url.toString() != 'about:blank') {
-                  // Load in same WebView — no popup
-                  await controller.loadUrl(urlRequest: URLRequest(url: url));
+                  await controller.evaluateJavascript(source: 
+                    'window.location.href = "${url.toString()}";'
+                  );
                 }
-                return true; // Always true — prevents iOS crash
+                return false; // false = iOS won't try to create new window
               },
               onCloseWindow: (controller) {
                 if (_webViewController != null) {
@@ -1545,13 +1606,56 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 }
               },
               onGeolocationPermissionsShowPrompt: (controller, origin) async {
+                // Auto-grant location for all LUNAS internal systems
                 return GeolocationPermissionShowPromptResponse(
                   origin: origin,
                   allow: true,
                   retain: true,
                 );
               },
-            ),
+              onWebViewCreated: (controller) {
+                _webViewController = controller;
+
+                // Add JS handler for print button
+                controller.addJavaScriptHandler(
+                  handlerName: 'printHandler',
+                  callback: (args) async {
+                    final url = _currentUrl.isNotEmpty ? _currentUrl : widget.url;
+                    final uri = Uri.parse(url);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                );
+
+                // Add JS handler for blob download
+                controller.addJavaScriptHandler(
+                  handlerName: 'blobDownload',
+                  callback: (args) async {
+                    if (args.isEmpty) return;
+                    try {
+                      final base64Data = args[0] as String;
+                      final fileName = args.length > 1 ? args[1] as String : 'download.xlsx';
+                      final bytes = base64Decode(base64Data);
+                      final dir = await getApplicationDocumentsDirectory();
+                      final file = File('${dir.path}/$fileName');
+                      await file.writeAsBytes(bytes);
+                      final result = await OpenFile.open(file.path);
+                      debugPrint('OpenFile result: ${result.message}');
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('Downloaded: $fileName'),
+                          backgroundColor: Colors.green,
+                          behavior: SnackBarBehavior.floating,
+                        ));
+                      }
+                    } catch (e) {
+                      debugPrint('Blob download error: $e');
+                    }
+                  },
+                );
+              },
+            ), // closes InAppWebView
             ), // closes Opacity
           ],
         ),
