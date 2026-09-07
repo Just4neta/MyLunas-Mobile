@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'login_screen.dart';
 import 'quote_screen.dart';
 import '../services/secure_storage.dart';
@@ -50,8 +51,87 @@ class _SplashScreenState extends State<SplashScreen>
     _controller.forward();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _checkForUpdate();
       _checkLoginStatus();
     });
+  }
+
+  // Current app version — update this on every release
+  static const String _currentVersion = '1.0.9';
+
+  Future<void> _checkForUpdate() async {
+    try {
+      // Check Play Store public page for latest version
+      final response = await http.get(
+        Uri.parse('https://play.google.com/store/apps/details?id=com.mylunas.mobile&hl=en'),
+        headers: {'User-Agent': 'Mozilla/5.0'},
+      ).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        // Extract version from Play Store page
+        final match = RegExp(r'\[\[\["(\d+\.\d+\.\d+)"').firstMatch(response.body);
+        final latestVersion = match?.group(1) ?? '';
+
+        if (latestVersion.isNotEmpty && latestVersion != _currentVersion && mounted) {
+          await _showUpdateDialog(latestVersion);
+        }
+      }
+    } catch (_) {
+      // Silent fail — no internet or rate limited
+    }
+  }
+
+  Future<void> _showUpdateDialog(String newVersion) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Column(children: [
+          Container(
+            width: 56, height: 56,
+            decoration: const BoxDecoration(color: Color(0xFFE3F2FD), shape: BoxShape.circle),
+            child: const Icon(Icons.system_update, color: Color(0xFF0D3B6E), size: 30),
+          ),
+          const SizedBox(height: 12),
+          const Text('Kemaskini Tersedia',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0D3B6E)),
+          ),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(10)),
+            child: Row(children: [
+              const Icon(Icons.new_releases, color: Color(0xFF1565C0), size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Versi baru: v$newVersion\nVersi semasa: v$_currentVersion',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF0D3B6E), fontWeight: FontWeight.w600))),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Text('Versi baru aplikasi MyLUNAS Mobile tersedia. Sila kemaskini untuk mendapat ciri dan pembaikan terbaru.',
+            style: const TextStyle(fontSize: 13, color: Color(0xFF444444)), textAlign: TextAlign.center),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Kemudian', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx),
+            icon: const Icon(Icons.download, size: 16),
+            label: const Text('Kemaskini Sekarang'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0D3B6E),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _checkLoginStatus() async {

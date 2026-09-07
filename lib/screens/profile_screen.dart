@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/secure_storage.dart';
 import '../l10n/app_strings.dart';
@@ -116,6 +117,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Gagal simpan gambar: $e'), backgroundColor: Colors.red),
         );
+      }
+    }
+  }
+
+  Future<void> _clearCache() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.cleaning_services, color: Color(0xFF1565C0)),
+          SizedBox(width: 8),
+          Text('Bersihkan Cache', style: TextStyle(fontSize: 17)),
+        ]),
+        content: const Text(
+          'Ini akan membersihkan cache pelayar web dalam aplikasi. Data log masuk anda tidak akan terjejas.\n\nGuna pilihan ini jika aplikasi berkelakuan pelik.',
+          style: TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1565C0), foregroundColor: Colors.white),
+            child: const Text('Bersihkan'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      await InAppWebViewController.clearAllCache();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Cache berjaya dibersihkan. Sila tutup dan buka semula aplikasi.'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 4),
+        ));
       }
     }
   }
@@ -294,7 +333,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           child: Column(
                             children: [
-                              const Text('🇲🇾', style: TextStyle(fontSize: 22)),
+                              Text('🇲🇾', style: const TextStyle(fontSize: 22)),
                               const SizedBox(height: 4),
                               Text(
                                 'Bahasa Melayu',
@@ -333,7 +372,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           child: Column(
                             children: [
-                              const Text('🇬🇧', style: TextStyle(fontSize: 22)),
+                              Text('🇬🇧', style: const TextStyle(fontSize: 22)),
                               const SizedBox(height: 4),
                               Text(
                                 'English',
@@ -463,6 +502,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
             const SizedBox(height: 24),
+
+            // Clear Cache button
+            SizedBox(
+              width: double.infinity, height: 48,
+              child: OutlinedButton.icon(
+                onPressed: _clearCache,
+                icon: const Icon(Icons.cleaning_services_outlined, size: 20),
+                label: const Text('Bersihkan Cache Aplikasi',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1565C0),
+                  side: const BorderSide(color: Color(0xFF1565C0)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
 
             // Logout
             SizedBox(

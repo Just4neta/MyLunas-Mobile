@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
@@ -230,7 +231,7 @@ class _HomeScreenState extends State<HomeScreen>
     {
       'title': 'TOMMS Web Request',
       'image': 'assets/images/logoMock_tomms2.png',
-      'url': 'https://tomms.biz/lunas_web',
+      'url': 'https://tomms.my/software/lunas_web.html',
       'disabled': 'false',
       'autoLogin': 'false',
       'external': 'true',
@@ -814,7 +815,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
-// WebView Screen — uses flutter_inappwebview for full camera/permission support
+// WebView Screen — robust with error recovery, retry, network check, progress
 class WebViewScreen extends StatefulWidget {
   final String title;
   final String url;
@@ -834,10 +835,15 @@ class WebViewScreen extends StatefulWidget {
 class _WebViewScreenState extends State<WebViewScreen> {
   InAppWebViewController? _webViewController;
   bool _isLoading = true;
+  bool _hasError = false;
+  String _errorMessage = '';
   String _currentUrl = '';
   int _autoLoginAttempts = 0;
   static const int _maxAutoLoginAttempts = 3;
   bool _autoLoginStopped = false;
+  int _loadProgress = 0;
+  int _retryCount = 0;
+  static const int _maxRetry = 3;
 
   final InAppWebViewSettings _settings = InAppWebViewSettings(
     javaScriptEnabled: true,
@@ -845,6 +851,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
     allowsInlineMediaPlayback: true,
     useHybridComposition: true,
     javaScriptCanOpenWindowsAutomatically: true,
+    supportMultipleWindows: true,
     allowsBackForwardNavigationGestures: true,
     supportZoom: true,
     builtInZoomControls: false,
@@ -853,12 +860,37 @@ class _WebViewScreenState extends State<WebViewScreen> {
     hardwareAcceleration: true,
     domStorageEnabled: true,
     databaseEnabled: true,
+    saveFormData: true,
+    useOnDownloadStart: true,
     allowFileAccessFromFileURLs: true,
     allowUniversalAccessFromFileURLs: true,
     mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
-    useOnDownloadStart: true,
     userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   );
+
+  // Retry loading
+  void _retry() {
+    if (_retryCount >= _maxRetry) {
+      // Max retry — offer to clear cache and retry
+      _clearCacheAndReload();
+      return;
+    }
+    setState(() {
+      _hasError = false;
+      _isLoading = true;
+      _retryCount++;
+    });
+    _webViewController?.reload();
+  }
+
+  // Clear cache and reload — last resort fix
+  Future<void> _clearCacheAndReload() async {
+    setState(() { _isLoading = true; _hasError = false; _retryCount = 0; });
+    await InAppWebViewController.clearAllCache();
+    final cookieManager = CookieManager.instance();
+    await cookieManager.deleteAllCookies();
+    _webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(widget.url)));
+  }
 
   void _showUpdatePasswordDialog() {
     final passwordController = TextEditingController();
@@ -1033,18 +1065,21 @@ class _WebViewScreenState extends State<WebViewScreen> {
     }
 
     _autoLoginAttempts++;
-    debugPrint('AUTO-LOGIN attempt $_autoLoginAttempts');
+    debugPrint('AUTO-LOGIN attempt $_autoLoginAttempts/$_maxAutoLoginAttempts');
 
-    // Only count as attempt if page shows login error OR credentials were submitted
+    // Only count as failed attempt if error detected
     final pageCheck = await _webViewController?.evaluateJavascript(source: '''
       (function() {
+        var bodyText = document.body ? document.body.innerText.toLowerCase() : "";
+        var hasError = bodyText.includes("denied") ||
+                       bodyText.includes("wrong") ||
+                       bodyText.includes("invalid") ||
+                       bodyText.includes("incorrect") ||
+                       bodyText.includes("gagal") ||
+                       bodyText.includes("salah") ||
+                       bodyText.includes("failed") ||
+                       bodyText.includes("error");
         var hasPasswordField = !!document.querySelector('input[name="password"], input[type="password"]');
-        var hasError = document.body.innerText.toLowerCase().includes("denied") ||
-                       document.body.innerText.toLowerCase().includes("wrong") ||
-                       document.body.innerText.toLowerCase().includes("invalid") ||
-                       document.body.innerText.toLowerCase().includes("incorrect") ||
-                       document.body.innerText.toLowerCase().includes("gagal") ||
-                       document.body.innerText.toLowerCase().includes("salah");
         return JSON.stringify({ hasPasswordField: hasPasswordField, hasError: hasError });
       })();
     ''');
@@ -1053,8 +1088,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
     bool hasLoginError = false;
     if (pageCheck != null && pageCheck != 'null') {
       try {
-        final raw = pageCheck.toString().replaceAll(r'\"', '"');
-        final str = raw.startsWith('"') ? raw.substring(1, raw.length - 1) : raw;
+        final raw = pageCheck.toString();
+        final str = raw.startsWith('"') ? raw.substring(1, raw.length - 1).replaceAll(r'\"', '"') : raw;
         final data = jsonDecode(str) as Map<String, dynamic>;
         isLoginPage = data['hasPasswordField'] == true;
         hasLoginError = data['hasError'] == true;
@@ -1062,20 +1097,20 @@ class _WebViewScreenState extends State<WebViewScreen> {
     }
 
     if (!isLoginPage) {
-      // Not a login page — login was successful, reset counter
       _autoLoginAttempts = 0;
-      debugPrint('AUTO-LOGIN: not login page, reset counter');
+      debugPrint('AUTO-LOGIN: success, counter reset');
       return;
     }
 
-    if (hasLoginError) {
-      // Login failed — this counts as a real attempt
-      debugPrint('AUTO-LOGIN: login error detected, attempt $_autoLoginAttempts');
+    if (!hasLoginError) {
+      // No error detected — reset counter, login likely succeeded or still processing
+      _autoLoginAttempts = 0;
+      debugPrint('AUTO-LOGIN: no error detected, counter reset');
     } else {
-      // Login form found but no error yet — submitting credentials
-      debugPrint('AUTO-LOGIN: submitting credentials, attempt $_autoLoginAttempts');
+      debugPrint('AUTO-LOGIN: login error detected, attempt $_autoLoginAttempts');
     }
 
+    // Submit credentials
     await _webViewController?.evaluateJavascript(source: '''
       (function() {
         var emailField = document.querySelector('input[name="email"]') ||
@@ -1124,13 +1159,84 @@ class _WebViewScreenState extends State<WebViewScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(widget.title),
+          title: Text(widget.title, style: const TextStyle(fontSize: 16)),
           backgroundColor: const Color(0xFF0D3B6E),
           foregroundColor: Colors.white,
+          actions: [
+            // Refresh button
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 22),
+              onPressed: () {
+                setState(() { _hasError = false; _isLoading = true; });
+                _webViewController?.reload();
+              },
+              tooltip: 'Muat semula',
+            ),
+          ],
+          bottom: _isLoading && !_hasError ? PreferredSize(
+            preferredSize: const Size.fromHeight(3),
+            child: LinearProgressIndicator(
+              value: _loadProgress > 0 ? _loadProgress / 100 : null,
+              backgroundColor: const Color(0xFF1565C0),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFFD700)),
+              minHeight: 3,
+            ),
+          ) : null,
         ),
         body: Stack(
           children: [
-            InAppWebView(
+            // Error screen
+            if (_hasError)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 72, height: 72,
+                        decoration: const BoxDecoration(color: Color(0xFFFFEBEE), shape: BoxShape.circle),
+                        child: const Icon(Icons.wifi_off_rounded, color: Color(0xFFE53935), size: 38),
+                      ),
+                      const SizedBox(height: 20),
+                      const Text('Tidak dapat memuatkan halaman',
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0D3B6E)),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _retryCount >= _maxRetry
+                          ? 'Masih gagal selepas $_maxRetry percubaan. Cuba bersihkan cache.'
+                          : 'Semak sambungan internet anda dan cuba semula.',
+                        style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 28),
+                      ElevatedButton.icon(
+                        onPressed: _retry,
+                        icon: Icon(_retryCount >= _maxRetry ? Icons.cleaning_services : Icons.refresh),
+                        label: Text(_retryCount >= _maxRetry ? 'Bersih Cache & Cuba Semula' : 'Cuba Semula ($_retryCount/$_maxRetry)'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0D3B6E),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Kembali ke Menu', style: TextStyle(color: Color(0xFF1565C0))),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // WebView — always rendered (hidden when error)
+            Opacity(
+              opacity: _hasError ? 0 : 1,
+              child: InAppWebView(
               initialUrlRequest: URLRequest(url: WebUri(widget.url)),
               initialSettings: _settings,
               onWebViewCreated: (controller) {
@@ -1211,6 +1317,13 @@ class _WebViewScreenState extends State<WebViewScreen> {
               onLoadStart: (controller, url) {
                 if (url != null) _currentUrl = url.toString();
                 setState(() => _isLoading = true);
+
+                // Reset auto-login when navigating to login page
+                // (handles back button navigation to login page)
+                final urlStr = url?.toString().toLowerCase() ?? '';
+                if (urlStr.contains('login') && !_autoLoginStopped) {
+                  _autoLoginAttempts = 0;
+                }
               },
               onLoadStop: (controller, url) async {
                 if (url != null) _currentUrl = url.toString();
@@ -1271,6 +1384,46 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   final dashboardUrl = '${baseUri.scheme}://${baseUri.host}${baseUri.path.substring(0, baseUri.path.lastIndexOf('/') + 1)}index.php';
                   await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
                 }
+
+                // Fix date picker and window.open crashes — critical for iOS WKWebView
+                await controller.evaluateJavascript(source: '''
+                  (function() {
+                    // iOS WKWebView: intercept window.open before it terminates WebView
+                    window.open = function(url, target, features) {
+                      if (url && url !== "" && url !== "about:blank") {
+                        // Navigate in same window instead of opening popup
+                        setTimeout(function() { window.location.href = url; }, 50);
+                      }
+                      // Return fake window object to prevent null reference errors
+                      return {
+                        closed: false,
+                        close: function() {},
+                        focus: function() {},
+                        document: document
+                      };
+                    };
+
+                    // Fix date inputs to use inline mode (prevents iOS native picker popup crash)
+                    document.querySelectorAll("input[type=date], input[type=datetime-local], input[type=month]")
+                      .forEach(function(el) {
+                        el.style.webkitAppearance = "none";
+                        el.style.appearance = "none";
+                      });
+
+                    // Intercept anchor tags with target="_blank" (iOS issue)
+                    document.addEventListener("click", function(e) {
+                      var el = e.target;
+                      while (el && el.tagName) {
+                        if (el.tagName === "A" && el.target === "_blank") {
+                          e.preventDefault();
+                          if (el.href) window.location.href = el.href;
+                          break;
+                        }
+                        el = el.parentElement;
+                      }
+                    }, true);
+                  })();
+                ''');
 
                 // Inject print handler — intercept window.print() and open in browser
                 await controller.evaluateJavascript(source: '''
@@ -1346,14 +1499,50 @@ class _WebViewScreenState extends State<WebViewScreen> {
               }
               return NavigationActionPolicy.ALLOW;
             },
+              onProgressChanged: (controller, progress) {
+                setState(() => _loadProgress = progress);
+              },
               onReceivedError: (controller, request, error) {
-                setState(() => _isLoading = false);
+                // Only show error for main frame, not subresources
+                if (request.isForMainFrame == true) {
+                  setState(() {
+                    _isLoading = false;
+                    _hasError = true;
+                    _errorMessage = error.description;
+                  });
+                }
+              },
+              onReceivedHttpError: (controller, request, response) {
+                if (request.isForMainFrame == true && (response.statusCode ?? 200) >= 500) {
+                  setState(() {
+                    _isLoading = false;
+                    _hasError = true;
+                    _errorMessage = 'Server error: ${response.statusCode}';
+                  });
+                }
               },
               onPermissionRequest: (controller, request) async {
                 return PermissionResponse(
                   resources: request.resources,
                   action: PermissionResponseAction.GRANT,
                 );
+              },
+              onCreateWindow: (controller, createWindowAction) async {
+                // iOS: MUST return true to tell WKWebView we handled the window
+                // If return false, iOS terminates the WebView session
+                final url = createWindowAction.request.url;
+                if (url != null && url.toString() != 'about:blank') {
+                  // Load in same WebView — no popup
+                  await controller.loadUrl(urlRequest: URLRequest(url: url));
+                }
+                return true; // Always true — prevents iOS crash
+              },
+              onCloseWindow: (controller) {
+                if (_webViewController != null) {
+                  _webViewController!.canGoBack().then((canGoBack) {
+                    if (canGoBack) _webViewController!.goBack();
+                  });
+                }
               },
               onGeolocationPermissionsShowPrompt: (controller, origin) async {
                 return GeolocationPermissionShowPromptResponse(
@@ -1363,8 +1552,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 );
               },
             ),
-            if (_isLoading)
-              const Center(child: CircularProgressIndicator()),
+            ), // closes Opacity
           ],
         ),
       ),
