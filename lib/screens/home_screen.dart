@@ -1613,48 +1613,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   retain: true,
                 );
               },
-              onWebViewCreated: (controller) {
-                _webViewController = controller;
-
-                // Add JS handler for print button
-                controller.addJavaScriptHandler(
-                  handlerName: 'printHandler',
-                  callback: (args) async {
-                    final url = _currentUrl.isNotEmpty ? _currentUrl : widget.url;
-                    final uri = Uri.parse(url);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  },
-                );
-
-                // Add JS handler for blob download
-                controller.addJavaScriptHandler(
-                  handlerName: 'blobDownload',
-                  callback: (args) async {
-                    if (args.isEmpty) return;
-                    try {
-                      final base64Data = args[0] as String;
-                      final fileName = args.length > 1 ? args[1] as String : 'download.xlsx';
-                      final bytes = base64Decode(base64Data);
-                      final dir = await getApplicationDocumentsDirectory();
-                      final file = File('${dir.path}/$fileName');
-                      await file.writeAsBytes(bytes);
-                      final result = await OpenFile.open(file.path);
-                      debugPrint('OpenFile result: ${result.message}');
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text('Downloaded: $fileName'),
-                          backgroundColor: Colors.green,
-                          behavior: SnackBarBehavior.floating,
-                        ));
-                      }
-                    } catch (e) {
-                      debugPrint('Blob download error: $e');
-                    }
-                  },
-                );
-              },
             ), // closes InAppWebView
             ), // closes Opacity
           ],
