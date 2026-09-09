@@ -911,6 +911,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
     databaseEnabled: true,
     saveFormData: true,
     geolocationEnabled: true,
+    disableInputAccessoryView: false,
     useOnDownloadStart: true,
     allowFileAccessFromFileURLs: true,
     allowUniversalAccessFromFileURLs: true,
@@ -1368,17 +1369,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 if (url != null) _currentUrl = url.toString();
                 setState(() => _isLoading = true);
 
-                // Inject window.open override EARLY — before page JS runs
-                // Critical for iOS WKWebView to prevent crash
-                controller.evaluateJavascript(source: '''
-                  window.open = function(url, target, features) {
-                    if (url && url !== "" && url !== "about:blank") {
-                      setTimeout(function() { window.location.href = url; }, 10);
-                    }
-                    return { closed: false, close: function(){}, focus: function(){}, document: document };
-                  };
-                ''');
-
                 // Reset auto-login when navigating to login page
                 final urlStr = url?.toString().toLowerCase() ?? '';
                 if (urlStr.contains('login') && !_autoLoginStopped) {
@@ -1445,36 +1435,41 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
                 }
 
-                // Fix date picker and window.open crashes — critical for iOS WKWebView
+                // iOS WKWebView fixes — runs after page fully loaded
                 await controller.evaluateJavascript(source: '''
                   (function() {
-                    // iOS WKWebView: intercept window.open before it terminates WebView
+                    // Fix window.open — return complete fake window object
                     window.open = function(url, target, features) {
                       if (url && url !== "" && url !== "about:blank") {
-                        // Navigate in same window instead of opening popup
                         setTimeout(function() { window.location.href = url; }, 50);
                       }
-                      // Return fake window object to prevent null reference errors
-                      return {
+                      var fakeWin = {
                         closed: false,
-                        close: function() {},
+                        opener: window,
+                        name: target || "",
+                        close: function() { this.closed = true; },
                         focus: function() {},
-                        document: document
+                        blur: function() {},
+                        postMessage: function() {},
+                        document: {
+                          write: function() {},
+                          writeln: function() {},
+                          close: function() {}
+                        },
+                        location: { href: url || "" }
                       };
+                      return fakeWin;
                     };
 
-                    // Fix date inputs to use inline mode (prevents iOS native picker popup crash)
-                    document.querySelectorAll("input[type=date], input[type=datetime-local], input[type=month]")
-                      .forEach(function(el) {
-                        el.style.webkitAppearance = "none";
-                        el.style.appearance = "none";
-                      });
+                    // Fix window.close
+                    window.close = function() {};
 
-                    // Intercept anchor tags with target="_blank" (iOS issue)
+                    // Fix target="_blank" links
                     document.addEventListener("click", function(e) {
                       var el = e.target;
-                      while (el && el.tagName) {
-                        if (el.tagName === "A" && el.target === "_blank") {
+                      for (var i = 0; i < 5; i++) {
+                        if (!el) break;
+                        if (el.tagName === "A" && (el.target === "_blank" || el.target === "_new")) {
                           e.preventDefault();
                           if (el.href) window.location.href = el.href;
                           break;
@@ -1482,6 +1477,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
                         el = el.parentElement;
                       }
                     }, true);
+
+                    // Fix date inputs for iOS
+                    var dateInputs = document.querySelectorAll(
+                      "input[type=date], input[type=datetime-local], input[type=month], input[type=week], input[type=time]"
+                    );
+                    dateInputs.forEach(function(input) {
+                      input.setAttribute("autocomplete", "off");
+                    });
+
                   })();
                 ''');
 
