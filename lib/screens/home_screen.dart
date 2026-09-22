@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -899,8 +900,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
     mediaPlaybackRequiresUserGesture: false,
     allowsInlineMediaPlayback: true,
     useHybridComposition: true,
-    javaScriptCanOpenWindowsAutomatically: false, // Prevent iOS WKWebView popup crash
-    supportMultipleWindows: false,
+    // iOS: allow popup JS but handle via UserScript + onCreateWindow
+    javaScriptCanOpenWindowsAutomatically: true,
+    supportMultipleWindows: true,
     allowsBackForwardNavigationGestures: true,
     supportZoom: true,
     builtInZoomControls: false,
@@ -916,7 +918,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
     allowFileAccessFromFileURLs: true,
     allowUniversalAccessFromFileURLs: true,
     mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
-    userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
   );
 
   // Retry loading
@@ -1290,6 +1292,36 @@ class _WebViewScreenState extends State<WebViewScreen> {
               child: InAppWebView(
               initialUrlRequest: URLRequest(url: WebUri(widget.url)),
               initialSettings: _settings,
+              initialUserScripts: UnmodifiableListView([
+                UserScript(
+                  source: '''
+                    (function() {
+                      var _fakeWindow = {
+                        closed: false, opener: window,
+                        close: function() { this.closed = true; },
+                        focus: function() {}, blur: function() {},
+                        postMessage: function() {},
+                        location: { href: "" },
+                        document: { write: function(){}, writeln: function(){}, close: function(){} }
+                      };
+                      window.open = function(url, target, features) {
+                        if (url && url !== "" && url !== "about:blank") {
+                          try { window.location.href = url; } catch(e) {}
+                        }
+                        return _fakeWindow;
+                      };
+                      window.close = function() {};
+                      window.addEventListener("error", function(e) {
+                        e.preventDefault(); return true;
+                      });
+                      window.addEventListener("unhandledrejection", function(e) {
+                        e.preventDefault();
+                      });
+                    })();
+                  ''',
+                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                ),
+              ]),
               onWebViewCreated: (controller) {
                 _webViewController = controller;
 
@@ -1592,15 +1624,16 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 );
               },
               onCreateWindow: (controller, createWindowAction) async {
-                // iOS: Return false — let our JS window.open override handle navigation
-                // Returning true without creating actual WKWebView crashes iOS
                 final url = createWindowAction.request.url;
-                if (url != null && url.toString() != 'about:blank') {
-                  await controller.evaluateJavascript(source: 
-                    'window.location.href = "${url.toString()}";'
-                  );
+                if (url != null) {
+                  final urlStr = url.toString();
+                  if (urlStr.isNotEmpty && urlStr != 'about:blank') {
+                    await controller.loadUrl(
+                      urlRequest: URLRequest(url: WebUri(urlStr)),
+                    );
+                  }
                 }
-                return false; // false = iOS won't try to create new window
+                return true;
               },
               onCloseWindow: (controller) {
                 if (_webViewController != null) {

@@ -52,10 +52,10 @@ class _MyLunasAppState extends State<MyLunasApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'MyLUNAS Mobile',
-      home: const SplashScreen(),
+      home: SplashScreen(),
     );
   }
 
