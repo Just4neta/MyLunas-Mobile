@@ -838,12 +838,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
   InAppWebViewController? _webViewController;
   bool _isLoading = true;
   bool _hasError = false;
-  String _errorMessage = '';
+  final String _errorMessage = '';
   String _currentUrl = '';
   int _autoLoginAttempts = 0;
   static const int _maxAutoLoginAttempts = 3;
   bool _autoLoginStopped = false;
-  int _loadProgress = 0;
+  final int _loadProgress = 0;
   int _retryCount = 0;
   static const int _maxRetry = 3;
 
@@ -918,7 +918,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
     allowFileAccessFromFileURLs: true,
     allowUniversalAccessFromFileURLs: true,
     mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
   );
 
   // Retry loading
@@ -1467,8 +1467,20 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   await controller.loadUrl(urlRequest: URLRequest(url: WebUri(dashboardUrl)));
                 }
 
-                // iOS WKWebView fixes — runs after page fully loaded
+                // Fix viewport — force mobile rendering
                 await controller.evaluateJavascript(source: '''
+                  (function() {
+                    var meta = document.querySelector("meta[name='viewport']");
+                    if (meta) {
+                      meta.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no");
+                    } else {
+                      var newMeta = document.createElement("meta");
+                      newMeta.name = "viewport";
+                      newMeta.content = "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no";
+                      document.head.appendChild(newMeta);
+                    }
+                  })();
+                ''');
                   (function() {
                     // Fix window.open — return complete fake window object
                     window.open = function(url, target, features) {
