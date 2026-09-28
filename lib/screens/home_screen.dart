@@ -838,12 +838,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
   InAppWebViewController? _webViewController;
   bool _isLoading = true;
   bool _hasError = false;
-  final String _errorMessage = '';
+  String _errorMessage = '';
   String _currentUrl = '';
   int _autoLoginAttempts = 0;
   static const int _maxAutoLoginAttempts = 3;
   bool _autoLoginStopped = false;
-  final int _loadProgress = 0;
+  int _loadProgress = 0;
   int _retryCount = 0;
   static const int _maxRetry = 3;
 
@@ -1294,7 +1294,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
               initialSettings: _settings,
               initialUserScripts: UnmodifiableListView([
                 UserScript(
-                  source: '''
+                  source: r'''
                     (function() {
                       var _fakeWindow = {
                         closed: false, opener: window,
@@ -1481,6 +1481,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
                     }
                   })();
                 ''');
+
+                // Fix window.open, target=_blank links, date inputs
+                await controller.evaluateJavascript(source: r'''
                   (function() {
                     // Fix window.open — return complete fake window object
                     window.open = function(url, target, features) {
